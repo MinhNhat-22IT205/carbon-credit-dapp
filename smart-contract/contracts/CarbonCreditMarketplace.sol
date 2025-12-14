@@ -51,6 +51,7 @@ contract CarbonCreditMarketplace {
         );
 
         require(tonsForSale > 0, "Zero tons");
+        require(!sales[batchTokenId].active, "Already on sale");
 
         cct.transferFrom(msg.sender, address(this), tonsForSale * 1e18);
 
@@ -79,15 +80,17 @@ contract CarbonCreditMarketplace {
         uint256 totalPrice = tons * PRICE_PER_TON;
         require(msg.value >= totalPrice, "Insufficient ETH");
 
+        // --- UPDATE STATE TRƯỚC ---
+        sale.availableTons -= tons;
+        if (sale.availableTons == 0) sale.active = false;
+
+        cct.transfer(msg.sender, tons * 1e18);
+
+        // --- GỬI ETH SAU ---
         payable(sale.seller).transfer(totalPrice);
         if (msg.value > totalPrice) {
             payable(msg.sender).transfer(msg.value - totalPrice);
         }
-
-        cct.transfer(msg.sender, tons * 1e18);
-        sale.availableTons -= tons;
-
-        if (sale.availableTons == 0) sale.active = false;
 
         emit CreditsPurchased(msg.sender, batchTokenId, tons, totalPrice);
     }
