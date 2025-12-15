@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { useReadContract, useReadContracts, useWriteContract } from "wagmi";
+import {
+  useReadContract,
+  useReadContracts,
+  useWriteContract,
+  useWaitForTransactionReceipt,
+} from "wagmi";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
 import BatchNFTCard from "./BatchNFTCard";
@@ -31,18 +36,14 @@ async function uploadToPinata(files: File[], claimId: string): Promise<string> {
   if (!PINATA_JWT) {
     throw new Error("Pinata API keys not configured. Check .env file");
   }
-
-  const folderName = `batch-${claimId}`; // Tên folder chung trên IPFS
-
+  const folderName = `batch-${claimId}`;
   const formData = new FormData();
 
-  // Add từng file với relative path: folderName/filename
   files.forEach((file) => {
     const relativePath = `${folderName}/${file.name}`;
     formData.append("file", file, relativePath);
   });
 
-  // pinataMetadata: tên folder hiển thị trên Pinata dashboard
   const metadata = JSON.stringify({
     name: `Green Carbon Batch #${claimId} - Audit Files`,
     keyvalues: {
@@ -53,9 +54,7 @@ async function uploadToPinata(files: File[], claimId: string): Promise<string> {
   });
   formData.append("pinataMetadata", metadata);
 
-  const options = JSON.stringify({
-    cidVersion: 1,
-  });
+  const options = JSON.stringify({ cidVersion: 1 });
   formData.append("pinataOptions", options);
 
   const response = await fetch(
@@ -71,9 +70,8 @@ async function uploadToPinata(files: File[], claimId: string): Promise<string> {
     const error = await response.text();
     throw new Error(`Pinata upload failed: ${error}`);
   }
-
   const result = await response.json();
-  return result.IpfsHash; // Đây là CID của folder
+  return result.IpfsHash;
 }
 
 // ============================================================================
@@ -81,7 +79,13 @@ async function uploadToPinata(files: File[], claimId: string): Promise<string> {
 // ============================================================================
 export default function AuditorDashboard() {
   const [claimId, setClaimId] = useState("");
-  const { writeContract, isPending } = useWriteContract();
+  const {
+    writeContract,
+    isPending: txPending,
+    data: hash,
+    error: txError,
+  } = useWriteContract();
+  const { isLoading: txConfirming } = useWaitForTransactionReceipt({ hash });
 
   // State for IPFS uploads
   const [uploadingClaims, setUploadingClaims] = useState<
@@ -130,20 +134,13 @@ export default function AuditorDashboard() {
       args: [item?.result?.projectId],
     })) || [];
 
-  const { data: projects } = useReadContracts({
-    contracts: projectContracts,
-  });
+  const { data: projects } = useReadContracts({ contracts: projectContracts });
 
   /* ---------- Handle file selection ---------- */
   const handleFileChange = (claimId: string, files: FileList | null) => {
     if (!files) return;
-
     const fileArray = Array.from(files);
-    setSelectedFiles((prev) => ({
-      ...prev,
-      [claimId]: fileArray,
-    }));
-
+    setSelectedFiles((prev) => ({ ...prev, [claimId]: fileArray }));
     setUploadStatus((prev) => ({
       ...prev,
       [claimId]: `${fileArray.length} file(s) selected`,
@@ -158,14 +155,13 @@ export default function AuditorDashboard() {
       return;
     }
 
-    // Lấy data claim & project (giống trước)
     const claimIndex = pendingClaimIds?.findIndex(
       (id) => id.toString() === claimIdStr
     );
     if (claimIndex === undefined || claimIndex === -1) return;
+
     const claim = pendingClaims?.[claimIndex]?.result as ClaimStruct;
     const project = projects?.[claimIndex]?.result as ProjectStruct;
-
     if (!claim || !project) {
       alert("Loading claim/project data...");
       return;
@@ -174,11 +170,10 @@ export default function AuditorDashboard() {
     setUploadingClaims((prev) => ({ ...prev, [claimIdStr]: true }));
     setUploadStatus((prev) => ({
       ...prev,
-      [claimIdStr]: "📤 Preparing metadata...",
+      [claimIdStr]: "Preparing metadata...",
     }));
 
     try {
-      // 1. Tạo metadata.json tự động
       const periodStartDate = new Date(
         Number(claim.periodStart) * 1000
       ).toLocaleDateString();
@@ -189,22 +184,25 @@ export default function AuditorDashboard() {
         Number(claim.periodStart) * 1000
       ).getFullYear();
 
-      // Tìm cover image (file đầu tiên có extension image, hoặc dùng placeholder text)
       const coverFile = files.find((f) =>
         /\.(jpg|jpeg|png|gif|webp)$/i.test(f.name)
       );
-      const imagePath = coverFile ? `${coverFile.name}` : ""; // sẽ thay bằng relative sau
+      const imagePath = coverFile ? `${coverFile.name}` : "";
 
       const metadataContent = {
         name: `Green Carbon Batch #${claimIdStr} - ${project.name} ${vintageYear}`,
         description: `Chứng nhận giảm phát thải ${claim.reductionTons} tấn CO₂e đã được audit độc lập.\nDự án: ${project.name}\nKỳ: ${periodStartDate} - ${periodEndDate}.`,
-        image: imagePath ? `ipfs://${imagePath}` : "", // sẽ cập nhật sau nếu có
+        image: imagePath ? `ipfs://${imagePath}` : "",
         external_url: files.find(
-          (f) => f.name.includes("audit") || f.name.includes("report")
+          (f) =>
+            f.name.toLowerCase().includes("audit") ||
+            f.name.toLowerCase().includes("report")
         )
           ? `ipfs://${
               files.find(
-                (f) => f.name.includes("audit") || f.name.includes("report")
+                (f) =>
+                  f.name.toLowerCase().includes("audit") ||
+                  f.name.toLowerCase().includes("report")
               )?.name
             }`
           : "",
@@ -230,34 +228,48 @@ export default function AuditorDashboard() {
       );
       const metadataFile = new File([metadataBlob], "metadata.json");
 
-      // 2. All files bao gồm metadata.json
       const allFiles = [...files, metadataFile];
 
-      // 3. Upload → nhận folderCID
       const folderCID = await uploadToPinata(allFiles, claimIdStr);
-
       setUploadStatus((prev) => ({
         ...prev,
-        [claimIdStr]: `✅ Uploaded folder: ${folderCID}`,
+        [claimIdStr]: `Uploaded folder: ${folderCID}`,
       }));
 
-      // 4. Call contract với tokenURI chuẩn
       writeContract({
         address: CONTRACT_ADDRESSES.REGISTRY,
         abi: RegistryABI,
         functionName: "auditAndIssue",
-        args: [BigInt(claimIdStr), `${folderCID}/metadata.json`], // hoặc chỉ folderCID nếu muốn marketplace tự đọc
+        args: [BigInt(claimIdStr), `ipfs://${folderCID}/metadata.json`],
       });
     } catch (error: any) {
       console.error("Audit error:", error);
       setUploadStatus((prev) => ({
         ...prev,
-        [claimIdStr]: `❌ Error: ${error.message}`,
+        [claimIdStr]: `Error: ${error.message}`,
       }));
       alert(`Failed: ${error.message}`);
     } finally {
       setUploadingClaims((prev) => ({ ...prev, [claimIdStr]: false }));
     }
+  };
+
+  /* ---------- Reject Claim ---------- */
+  const rejectClaim = (claimIdStr: string) => {
+    if (
+      !confirm(
+        `Are you sure you want to REJECT Claim #${claimIdStr}? This action cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    writeContract({
+      address: CONTRACT_ADDRESSES.REGISTRY,
+      abi: RegistryABI,
+      functionName: "rejectClaim", // Hàm rejectClaim phải tồn tại trong contract
+      args: [BigInt(claimIdStr)],
+    });
   };
 
   /* ---------- Quick audit (for testing) ---------- */
@@ -273,21 +285,20 @@ export default function AuditorDashboard() {
   return (
     <div className="bg-white rounded-xl shadow-md p-6">
       <h2 className="text-2xl font-bold mb-6 text-purple-800">
-        🔍 Auditor Dashboard
+        Auditor Dashboard
       </h2>
 
       {/* IPFS Configuration Notice */}
       {!PINATA_JWT && (
         <div className="mb-6 p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700">
-          <p className="font-bold">⚠️ IPFS Not Configured</p>
-          <p className="text-sm mt-1">
-            Add VITE_PINATA_API_KEY and VITE_PINATA_SECRET_KEY to your .env file
-          </p>
+          <p className="font-bold">IPFS Not Configured</p>
+          <p className="text-sm mt-1">Add VITE_PINATA_JWT to your .env file</p>
           <p className="text-xs mt-2 text-gray-600">
-            Get free API keys at{" "}
+            Get free JWT at{" "}
             <a
               href="https://pinata.cloud"
               target="_blank"
+              rel="noreferrer"
               className="underline"
             >
               pinata.cloud
@@ -296,7 +307,7 @@ export default function AuditorDashboard() {
         </div>
       )}
 
-      {/* ---------- Audit by ID (Simple) ---------- */}
+      {/* ---------- Quick Audit (Testing) ---------- */}
       <div className="mb-6 p-4 bg-gray-50 rounded-lg">
         <h3 className="font-semibold mb-3">Quick Audit (Testing)</h3>
         <div className="flex gap-3">
@@ -309,10 +320,10 @@ export default function AuditorDashboard() {
           />
           <button
             onClick={() => quickAudit(claimId)}
-            disabled={isPending || !claimId}
+            disabled={txPending || !claimId}
             className="bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50"
           >
-            {isPending ? "Processing..." : "Quick Audit"}
+            {txPending ? "Processing..." : "Quick Audit"}
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-2">
@@ -327,20 +338,19 @@ export default function AuditorDashboard() {
         />
       )}
 
-      {/* ---------- Pending claims list with IPFS upload ---------- */}
+      {/* ---------- Pending claims list ---------- */}
       <h3 className="text-xl font-semibold mb-6 mt-8">
-        📋 Pending Claims for Audit ({pendingClaimIds?.length || 0})
+        Pending Claims for Audit ({pendingClaimIds?.length || 0})
       </h3>
 
       {pendingClaims && pendingClaims.length > 0 ? (
-        <div className="space-y-6">
+        <div className="space-y-8">
           {pendingClaims.map((item: any, index: number) => {
             const claim = item?.result as ClaimStruct | undefined;
             const project = projects?.[index]?.result as
               | ProjectStruct
               | undefined;
             const currentClaimId = pendingClaimIds?.[index]?.toString() || "";
-
             if (!claim) return null;
 
             const isUploading = uploadingClaims[currentClaimId];
@@ -350,24 +360,22 @@ export default function AuditorDashboard() {
             return (
               <div
                 key={currentClaimId}
-                className="bg-gradient-to-r from-yellow-50 to-orange-50 p-6 rounded-xl border-2 border-yellow-400 shadow-sm"
+                className="bg-gradient-to-r from-yellow-50 to-orange-50 p-8 rounded-2xl border-2 border-yellow-400 shadow-lg"
               >
-                <div className="grid md:grid-cols-2 gap-6">
+                <div className="grid md:grid-cols-2 gap-8">
                   {/* Left: Claim Info */}
                   <div>
-                    <p className="font-bold text-xl text-purple-800 mb-3">
+                    <p className="font-bold text-2xl text-purple-800 mb-4">
                       Claim #{currentClaimId}
                     </p>
-
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-start gap-2">
+                    <div className="space-y-3 text-base">
+                      <div className="flex items-start gap-3">
                         <span className="font-semibold min-w-[100px]">
                           Project:
                         </span>
                         <span>{project?.name || "Loading..."}</span>
                       </div>
-
-                      <div className="flex items-start gap-2">
+                      <div className="flex items-start gap-3">
                         <span className="font-semibold min-w-[100px]">
                           Owner:
                         </span>
@@ -375,17 +383,15 @@ export default function AuditorDashboard() {
                           {project?.owner || "Loading..."}
                         </span>
                       </div>
-
-                      <div className="flex items-start gap-2">
+                      <div className="flex items-start gap-3">
                         <span className="font-semibold min-w-[100px]">
                           Reduction:
                         </span>
-                        <span className="text-green-700 font-bold">
+                        <span className="text-green-700 font-bold text-xl">
                           {claim.reductionTons.toString()} tons CO₂
                         </span>
                       </div>
-
-                      <div className="flex items-start gap-2">
+                      <div className="flex items-start gap-3">
                         <span className="font-semibold min-w-[100px]">
                           Baseline:
                         </span>
@@ -393,8 +399,7 @@ export default function AuditorDashboard() {
                           {project?.baselineEmissions.toString()} tons/year
                         </span>
                       </div>
-
-                      <div className="flex items-start gap-2">
+                      <div className="flex items-start gap-3">
                         <span className="font-semibold min-w-[100px]">
                           Evidence:
                         </span>
@@ -402,51 +407,52 @@ export default function AuditorDashboard() {
                           href={`https://ipfs.io/ipfs/${claim.evidenceIPFS}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline text-xs break-all"
+                          className="text-blue-600 hover:underline text-sm break-all"
                         >
-                          {claim.evidenceIPFS.slice(0, 20)}...
+                          {claim.evidenceIPFS.slice(0, 30)}...
                         </a>
                       </div>
                     </div>
                   </div>
 
-                  {/* Right: Upload & Audit */}
-                  <div className="flex flex-col gap-3">
-                    <div className="bg-white p-4 rounded-lg border-2 border-dashed border-purple-300">
-                      <label className="block font-semibold mb-2 text-sm">
-                        📄 Upload Audit Report
+                  {/* Right: Actions */}
+                  <div className="flex flex-col gap-5">
+                    {/* File Upload */}
+                    <div className="bg-white p-5 rounded-xl border-2 border-dashed border-purple-300">
+                      <label className="block font-bold mb-3 text-purple-800">
+                        Upload Audit Report
                       </label>
-
                       <input
                         type="file"
                         multiple
-                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.zip"
                         onChange={(e) =>
                           handleFileChange(currentClaimId, e.target.files)
                         }
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+                        className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
                         disabled={isUploading}
                       />
-
                       {files.length > 0 && (
-                        <div className="mt-3 text-xs space-y-1">
+                        <div className="mt-4 text-sm">
                           <p className="font-semibold text-gray-700">
-                            Selected files:
+                            Selected files ({files.length}):
                           </p>
-                          {files.map((file, idx) => (
-                            <p key={idx} className="text-gray-600 truncate">
-                              • {file.name} ({(file.size / 1024).toFixed(1)} KB)
-                            </p>
-                          ))}
+                          <div className="max-h-32 overflow-y-auto mt-2">
+                            {files.map((file, idx) => (
+                              <p key={idx} className="text-gray-600 truncate">
+                                • {file.name} ({(file.size / 1024).toFixed(1)}{" "}
+                                KB)
+                              </p>
+                            ))}
+                          </div>
                         </div>
                       )}
-
                       {status && (
                         <p
-                          className={`mt-3 text-sm font-medium ${
-                            status.includes("✅")
+                          className={`mt-4 text-sm font-medium ${
+                            status.includes("Uploaded")
                               ? "text-green-600"
-                              : status.includes("❌")
+                              : status.includes("Error")
                               ? "text-red-600"
                               : "text-blue-600"
                           }`}
@@ -456,52 +462,50 @@ export default function AuditorDashboard() {
                       )}
                     </div>
 
-                    <button
-                      onClick={() => auditClaimWithIPFS(currentClaimId)}
-                      disabled={isUploading || files.length === 0 || isPending}
-                      className={`w-full px-6 py-3 rounded-lg font-semibold transition-all ${
-                        isUploading || isPending
-                          ? "bg-gray-400 cursor-not-allowed"
+                    {/* Action Buttons */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* APPROVE */}
+                      <button
+                        onClick={() => auditClaimWithIPFS(currentClaimId)}
+                        disabled={
+                          isUploading ||
+                          files.length === 0 ||
+                          txPending ||
+                          txConfirming
+                        }
+                        className={`py-4 rounded-xl font-bold text-white transition-all ${
+                          isUploading || txPending || txConfirming
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : files.length === 0
+                            ? "bg-gray-300 cursor-not-allowed"
+                            : "bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-lg"
+                        }`}
+                      >
+                        {isUploading
+                          ? "Uploading..."
+                          : txPending || txConfirming
+                          ? "Processing..."
                           : files.length === 0
-                          ? "bg-gray-300 cursor-not-allowed"
-                          : "bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-lg hover:shadow-xl"
-                      }`}
-                    >
-                      {isUploading ? (
-                        <span className="flex items-center justify-center gap-2">
-                          <svg
-                            className="animate-spin h-5 w-5"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              strokeWidth="4"
-                              fill="none"
-                            />
-                            <path
-                              className="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                            />
-                          </svg>
-                          Uploading to IPFS...
-                        </span>
-                      ) : isPending ? (
-                        "⏳ Processing Transaction..."
-                      ) : files.length === 0 ? (
-                        "📁 Select Files First"
-                      ) : (
-                        "✅ Upload & Approve Claim"
-                      )}
-                    </button>
+                          ? "Select Files"
+                          : "Approve & Issue"}
+                      </button>
 
-                    <p className="text-xs text-gray-500 text-center">
-                      Files will be uploaded to IPFS before blockchain
-                      transaction
+                      {/* REJECT */}
+                      <button
+                        onClick={() => rejectClaim(currentClaimId)}
+                        disabled={txPending || txConfirming}
+                        className="py-4 rounded-xl font-bold text-white bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 shadow-lg disabled:opacity-60"
+                      >
+                        {txPending || txConfirming
+                          ? "Processing..."
+                          : "Reject Claim"}
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-center text-gray-500 mt-2">
+                      Approve: Upload files + mint NFT & CCT
+                      <br />
+                      Reject: Permanently reject this claim
                     </p>
                   </div>
                 </div>
@@ -510,13 +514,13 @@ export default function AuditorDashboard() {
           })}
         </div>
       ) : (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">🎉</div>
-          <p className="text-gray-600 text-lg">
-            No pending claims at the moment.
+        <div className="text-center py-16">
+          <div className="text-7xl mb-6">🎉</div>
+          <p className="text-gray-600 text-2xl font-semibold">
+            No pending claims
           </p>
-          <p className="text-gray-500 text-sm mt-2">
-            Great job! All claims have been audited.
+          <p className="text-gray-500 text-lg mt-3">
+            All claims have been processed. Great job!
           </p>
         </div>
       )}

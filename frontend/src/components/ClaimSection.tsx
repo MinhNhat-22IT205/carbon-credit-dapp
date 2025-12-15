@@ -467,9 +467,25 @@ export default function ClaimSection() {
                                 : "text-green-600"
                             }
                           >
-                            {claim.status === 0n
-                              ? "Pending Audit"
-                              : "Audited & Issued"}
+                            {(() => {
+                              // Status enum mapping order (0-5): Pending, Audited, Rejected, OnSale, Sold, Cancelled
+                              switch (Number(claim.status)) {
+                                case 0:
+                                  return "Pending Audit";
+                                case 1:
+                                  return "Audited & Issued";
+                                case 2:
+                                  return "Rejected";
+                                case 3:
+                                  return "On Sale";
+                                case 4:
+                                  return "Sold";
+                                case 5:
+                                  return "Cancelled";
+                                default:
+                                  return "Unknown";
+                              }
+                            })()}
                           </span>
                         </p>
 

@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/home/nyatto/Projects/carbon-credit-blockchain/smart-contract/contracts/CarbonCreditMarketplace.sol": {
-      "lastModificationDate": 1765627140032,
-      "contentHash": "0b1501914c8c73eac0db641ec8a3e941",
+      "lastModificationDate": 1765794066481,
+      "contentHash": "1d2cab87433e4e859601d948e5693c78",
       "sourceName": "contracts/CarbonCreditMarketplace.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -31,9 +31,12 @@
       },
       "imports": [
         "./CarbonCreditToken.sol",
-        "./CarbonCreditRegistry.sol"
+        "./CarbonCreditRegistry.sol",
+        "./GreenNFTCollection.sol"
       ],
-      "versionPragmas": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
       "artifacts": [
         "CarbonCreditMarketplace"
       ]
@@ -81,8 +84,8 @@
       ]
     },
     "/home/nyatto/Projects/carbon-credit-blockchain/smart-contract/contracts/CarbonCreditRegistry.sol": {
-      "lastModificationDate": 1765677456818,
-      "contentHash": "66e939931e68b66f1350885c40c9ac9e",
+      "lastModificationDate": 1765793606718,
+      "contentHash": "1dd6fd6a80bffd75e1e4cb98147bb850",
       "sourceName": "contracts/CarbonCreditRegistry.sol",
       "solcConfig": {
         "version": "0.8.28",

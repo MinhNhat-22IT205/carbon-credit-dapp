@@ -1,9 +1,9 @@
 export const CONTRACT_ADDRESSES = {
-  CCT: "0x091569D3bF40F1a1651aBecCF335080407D1C0C3" as `0x${string}`,
+  CCT: "0x78eCFbcB433c36e21FF0267416f013558cfb977e" as `0x${string}`,
   GREEN_NFT_COLLECTION:
-    "0x404d1432D072fb04444Ac913e00D4d43476315b8" as `0x${string}`,
-  REGISTRY: "0x3C6677C2b709577E3345D7b9a1a1569a93b6C2dc" as `0x${string}`,
-  MARKETPLACE: "0x99CD83bd7Af065257C290Bd8b6b283A61438e9a4" as `0x${string}`,
+    "0x40480908f63d2CdE29629b129cfa896d566a84c5" as `0x${string}`,
+  REGISTRY: "0xBa11f84D2350440cf6d6b26173016f68ba9152D8" as `0x${string}`,
+  MARKETPLACE: "0xc2EBC15E474CeD3C31463bb61f7f68B7dcD45421" as `0x${string}`,
 };
 
 export const CHAIN_ID = 11155111; // Sepolia, đổi thành 1 nếu mainnet

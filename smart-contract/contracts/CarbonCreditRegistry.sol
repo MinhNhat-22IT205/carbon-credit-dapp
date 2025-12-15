@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 
 contract CarbonCreditRegistry is AccessControlEnumerable {
     bytes32 public constant AUDITOR_ROLE = keccak256("AUDITOR_ROLE");
+    address public marketplace;
 
     CarbonCreditToken public cct;
     GreenNFTCollection public greenNFTCollection; // Single collection
@@ -16,7 +17,9 @@ contract CarbonCreditRegistry is AccessControlEnumerable {
     enum Status {
         Pending,
         Audited,
+        Rejected,
         OnSale,
+        Sold,
         Cancelled
     }
 
@@ -38,6 +41,7 @@ contract CarbonCreditRegistry is AccessControlEnumerable {
 
     mapping(uint256 => Project) public projects;
     mapping(uint256 => Claim) public claims;
+    mapping(uint256 => uint256) public batchToClaimId;
 
     event ProjectRegistered(
         uint256 indexed projectId,
@@ -56,6 +60,7 @@ contract CarbonCreditRegistry is AccessControlEnumerable {
     );
     event AuditorAdded(address indexed auditor);
     event AuditorRemoved(address indexed auditor);
+    event ClaimRejected(uint256 indexed claimId);
 
     constructor(
         CarbonCreditToken _cct,
@@ -65,6 +70,24 @@ contract CarbonCreditRegistry is AccessControlEnumerable {
         greenNFTCollection = _greenNFTCollection;
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setRoleAdmin(AUDITOR_ROLE, DEFAULT_ADMIN_ROLE); // Admin quản lý auditor role
+    }
+
+    function setMarketplace(
+        address _marketplace
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        marketplace = _marketplace;
+    }
+
+    modifier onlyMarketplace() {
+        require(msg.sender == marketplace, "Not marketplace");
+        _;
+    }
+
+    function setClaimStatus(
+        uint256 claimId,
+        Status newStatus
+    ) external onlyMarketplace {
+        claims[claimId].status = newStatus;
     }
 
     // ==================== ROLE MANAGEMENT ====================
@@ -165,12 +188,22 @@ contract CarbonCreditRegistry is AccessControlEnumerable {
         );
 
         claim.batchTokenId = batchTokenId;
+        batchToClaimId[batchTokenId] = claimId;
 
         // Mint CCT = số tấn giảm được
         cct.mint(projects[claim.projectId].owner, claim.reductionTons * 1e18); // 1e18 = 1 CCT
 
         emit ClaimAudited(claimId, claim.reductionTons, batchTokenId);
         return batchTokenId;
+    }
+
+    function rejectClaim(uint256 claimId) external onlyRole(AUDITOR_ROLE) {
+        Claim storage claim = claims[claimId];
+        require(claim.status == Status.Pending, "Not pending");
+
+        claim.status = Status.Rejected;
+
+        emit ClaimRejected(claimId);
     }
 
     // Getters...

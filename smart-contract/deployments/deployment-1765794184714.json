@@ -1,0 +1,10 @@
+{
+  "chainId": "11155111",
+  "deployer": "0x212f0437f256Fd87EFcE5A10d061832F74F9A9Ca",
+  "CarbonCreditToken": "0x78eCFbcB433c36e21FF0267416f013558cfb977e",
+  "GreenNFTCollection": "0x40480908f63d2CdE29629b129cfa896d566a84c5",
+  "CarbonCreditRegistry": "0xBa11f84D2350440cf6d6b26173016f68ba9152D8",
+  "CarbonCreditMarketplace": "0xc2EBC15E474CeD3C31463bb61f7f68B7dcD45421",
+  "blockNumber": "9845213",
+  "timestamp": "2025-12-15T10:23:04.714Z"
+}
