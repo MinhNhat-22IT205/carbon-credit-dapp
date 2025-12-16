@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   useAccount,
   useReadContract,
+  useReadContracts,
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
-import { parseEther } from "viem";
+import { formatUnits, parseUnits, parseEther } from "viem";
 import MarketplaceABI from "../contracts/abi/CarbonCreditMarketplace.json";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
@@ -21,31 +22,267 @@ interface NFTMetadata {
   attributes?: Array<{ trait_type: string; value: any }>;
 }
 
+// Modal chi tiết bundle để mua
+function BundleDetailModal({
+  batchId,
+  onClose,
+}: {
+  batchId: bigint;
+  onClose: () => void;
+}) {
+  const { address, isConnected } = useAccount();
+  const [tonsToBuy, setTonsToBuy] = useState("");
+  const { writeContract } = useWriteContract();
+
+  const { data: hash, isPending: writePending } = useWriteContract();
+  const { isLoading: txLoading } = useWaitForTransactionReceipt({ hash });
+
+  const { data: saleRaw } = useReadContract({
+    address: CONTRACT_ADDRESSES.MARKETPLACE,
+    abi: MarketplaceABI,
+    functionName: "getBatchSale",
+    args: [batchId],
+  });
+
+  const sale = saleRaw
+    ? {
+        seller: saleRaw[0] as string,
+        totalTons: saleRaw[1] as bigint,
+        availableTons: saleRaw[2] as bigint,
+        active: saleRaw[3] as boolean,
+      }
+    : null;
+
+  const { data: tokenURI } = useReadContract({
+    address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
+    abi: GreenNFTABI,
+    functionName: "tokenURI",
+    args: [batchId],
+  });
+
+  const [metadata, setMetadata] = useState<NFTMetadata | null>(null);
+
+  // Fetch metadata (an toàn, không dùng hook trong effect nữa - dùng effect thuần)
+  useState(() => {
+    if (!tokenURI) return;
+    const fetchMeta = async () => {
+      const uri = tokenURI.startsWith("ipfs://")
+        ? tokenURI.replace("ipfs://", "https://ipfs.io/ipfs/")
+        : tokenURI;
+      try {
+        const res = await fetch(uri);
+        if (res.ok) setMetadata(await res.json());
+      } catch (e) {
+        console.error("Metadata fetch error:", e);
+      }
+    };
+    fetchMeta();
+  }, [tokenURI]);
+
+  if (!sale?.active) return null;
+
+  const availableTons = Number(formatUnits(sale.availableTons, 0));
+  const tonsInput = tonsToBuy ? parseFloat(tonsToBuy) || 0 : 0;
+  const totalPrice = tonsInput * PRICE_PER_TON;
+
+  const handleBuy = () => {
+    if (tonsInput <= 0 || tonsInput > availableTons) return;
+
+    const tonsBigInt = BigInt(Math.floor(tonsInput));
+    const totalPrice = Number(tonsBigInt) * PRICE_PER_TON;
+
+    writeContract({
+      address: CONTRACT_ADDRESSES.MARKETPLACE,
+      abi: MarketplaceABI,
+      functionName: "buyCredits",
+      args: [batchId, tonsBigInt],
+      value: parseEther(totalPrice.toString()),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full my-8">
+        <div className="p-8">
+          <div className="flex justify-between items-start mb-6">
+            <h2 className="text-3xl font-bold text-green-800">
+              Verified Carbon Bundle #{batchId.toString()}
+            </h2>
+            <button
+              onClick={onClose}
+              className="text-3xl text-gray-500 hover:text-gray-700"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            <div>
+              {metadata?.image && (
+                <img
+                  src={metadata.image.replace(
+                    "ipfs://",
+                    "https://ipfs.io/ipfs/"
+                  )}
+                  alt="Certificate"
+                  className="w-full rounded-2xl shadow-lg"
+                />
+              )}
+              <div className="mt-6">
+                <h3 className="text-2xl font-bold text-gray-800">
+                  {metadata?.name || "Carbon Bundle"}
+                </h3>
+                <p className="text-gray-600 mt-3 leading-relaxed">
+                  {metadata?.description}
+                </p>
+                {metadata?.attributes && (
+                  <div className="grid grid-cols-2 gap-4 mt-6">
+                    {metadata.attributes.map((attr, i) => (
+                      <div key={i} className="bg-gray-50 p-4 rounded-xl">
+                        <p className="text-sm text-gray-500">
+                          {attr.trait_type}
+                        </p>
+                        <p className="font-semibold">{attr.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-8 rounded-2xl">
+              <div className="space-y-6">
+                <div>
+                  <p className="text-lg text-gray-700">
+                    Available for Purchase
+                  </p>
+                  <p className="text-4xl font-bold text-green-700">
+                    {availableTons.toFixed(6)} tons CO₂e
+                  </p>
+                </div>
+
+                <input
+                  type="number"
+                  min="0.000001"
+                  step="0.000001"
+                  placeholder="Enter tons to buy"
+                  value={tonsToBuy}
+                  onChange={(e) => setTonsToBuy(e.target.value)}
+                  className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl text-xl focus:border-green-500"
+                  disabled={!isConnected}
+                />
+
+                {tonsInput > 0 && (
+                  <div className="bg-white p-6 rounded-xl">
+                    <div className="flex justify-between text-xl">
+                      <span>Total Cost</span>
+                      <span className="font-bold text-blue-600">
+                        {totalPrice.toFixed(6)} ETH
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleBuy}
+                  disabled={
+                    !isConnected ||
+                    tonsInput <= 0 ||
+                    tonsInput > availableTons ||
+                    txLoading ||
+                    writePending
+                  }
+                  className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-5 rounded-xl font-bold text-xl hover:from-green-700 hover:to-emerald-700 disabled:opacity-60"
+                >
+                  {txLoading || writePending
+                    ? "Processing..."
+                    : "Purchase Credits"}
+                </button>
+
+                <p className="text-sm text-center text-gray-600">
+                  Seller: {sale?.seller.slice(0, 10)}...{sale?.seller.slice(-8)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MarketplaceSection() {
   const { address, isConnected } = useAccount();
+  const [activeTab, setActiveTab] = useState<
+    "available" | "myListings" | "history"
+  >("available");
+  const [selectedBundle, setSelectedBundle] = useState<bigint | null>(null);
+  const [sellBundleId, setSellBundleId] = useState("");
 
-  const [sellBatchId, setSellBatchId] = useState("");
-  const [buyBatchId, setBuyBatchId] = useState("");
-  const [buyTons, setBuyTons] = useState("");
+  const {
+    writeContract,
+    data: hash,
+    isPending: writePending,
+  } = useWriteContract();
+  // Sửa lỗi 2: Đúng cách dùng useWaitForTransactionReceipt
+  const { isLoading: txLoading } = useWaitForTransactionReceipt({ hash });
+
+  // === Danh sách bundle đang bán ===
+  const { data: activeBatchIds = [] } = useReadContract({
+    address: CONTRACT_ADDRESSES.MARKETPLACE,
+    abi: MarketplaceABI,
+    functionName: "getActiveBatchSales",
+  });
+
+  // Batch read sale info
+  const { data: salesData } = useReadContracts({
+    contracts: activeBatchIds.map((id) => ({
+      address: CONTRACT_ADDRESSES.MARKETPLACE,
+      abi: MarketplaceABI,
+      functionName: "getBatchSale",
+      args: [id],
+    })),
+    allowFailure: false,
+  });
+
+  // Sửa lỗi 3: Dùng useReadContracts để lấy tất cả tokenURI cùng lúc
+  const { data: tokenURIs } = useReadContracts({
+    contracts: activeBatchIds.map((id) => ({
+      address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
+      abi: GreenNFTABI,
+      functionName: "tokenURI",
+      args: [id],
+    })),
+    allowFailure: false,
+  });
 
   const [metadataCache, setMetadataCache] = useState<
     Record<string, NFTMetadata>
   >({});
 
-  const {
-    writeContract,
-    data: hash,
-    error: writeError,
-    reset,
-  } = useWriteContract();
-  const { isLoading: txLoading, isSuccess: txSuccess } =
-    useWaitForTransactionReceipt({ hash });
+  // Fetch metadata từ tokenURIs (an toàn, không dùng hook trong effect)
+  useEffect(() => {
+    if (!tokenURIs || tokenURIs.length === 0) return;
+    tokenURIs.forEach(async (uriResult, i) => {
+      const idStr = activeBatchIds[i].toString();
+      if (!uriResult || metadataCache[idStr]) return;
+      let uri = typeof uriResult === "string" ? uriResult : "";
+      if (uri.startsWith("ipfs://"))
+        uri = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
+      try {
+        const res = await fetch(uri);
+        if (res.ok) {
+          const meta = await res.json();
+          setMetadataCache((prev) => ({ ...prev, [idStr]: meta }));
+        }
+      } catch (e) {}
+    });
+  }, [tokenURIs, activeBatchIds]);
 
-  // ================== SELL SECTION ==================
-  const sellBigId = sellBatchId ? BigInt(sellBatchId) : undefined;
+  // === Phần My Listings (giữ nguyên logic cũ, chỉ sửa nhỏ) ===
+  const sellBigId = sellBundleId ? BigInt(sellBundleId) : undefined;
 
-  // Kiểm tra owner NFT
-  const { data: sellBatchOwner } = useReadContract({
+  const { data: owner } = useReadContract({
     address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
     abi: GreenNFTABI,
     functionName: "ownerOf",
@@ -53,7 +290,6 @@ export default function MarketplaceSection() {
     enabled: !!sellBigId,
   });
 
-  // Lấy claimId từ Registry
   const { data: claimId } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
     abi: RegistryABI,
@@ -62,7 +298,6 @@ export default function MarketplaceSection() {
     enabled: !!sellBigId,
   });
 
-  // Lấy claim để biết số tấn thực tế
   const { data: claim } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
     abi: RegistryABI,
@@ -71,19 +306,9 @@ export default function MarketplaceSection() {
     enabled: !!claimId,
   });
 
-  const actualTons = claim?.reductionTons || 0n; // Số tấn đúng từ audit
+  const actualTons = claim?.reductionTons || 0n;
 
-  // Lấy tokenURI để fetch metadata
-  const { data: sellTokenURI } = useReadContract({
-    address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
-    abi: GreenNFTABI,
-    functionName: "tokenURI",
-    args: sellBigId ? [sellBigId] : undefined,
-    enabled: !!sellBigId,
-  });
-
-  // Lấy thông tin sale từ Marketplace (nếu đã mở bán)
-  const { data: sellSaleRaw } = useReadContract({
+  const { data: saleInfoRaw } = useReadContract({
     address: CONTRACT_ADDRESSES.MARKETPLACE,
     abi: MarketplaceABI,
     functionName: "getBatchSale",
@@ -91,17 +316,14 @@ export default function MarketplaceSection() {
     enabled: !!sellBigId,
   });
 
-  const sellSale = sellSaleRaw
+  const saleInfo = saleInfoRaw
     ? {
-        seller: sellSaleRaw[0] as string,
-        totalTons: sellSaleRaw[1] as bigint,
-        availableTons: sellSaleRaw[2] as bigint,
-        active: sellSaleRaw[3] as boolean,
+        availableTons: saleInfoRaw[2] as bigint,
+        active: saleInfoRaw[3] as boolean,
       }
     : null;
 
-  // Allowance
-  const { data: allowance, refetch: refetchAllowance } = useReadContract({
+  const { data: allowance } = useReadContract({
     address: CONTRACT_ADDRESSES.CCT,
     abi: CCTABI,
     functionName: "allowance",
@@ -110,88 +332,10 @@ export default function MarketplaceSection() {
     watch: true,
   });
 
-  const isSellOwner = sellBatchOwner === address;
-  const hasEnoughAllowance =
-    allowance && actualTons > 0n
-      ? allowance >= actualTons * 1000000000000000000n
-      : false;
+  const isOwner = owner === address;
+  const hasEnoughAllowance = allowance ? allowance >= actualTons : false;
 
-  // ================== BUY SECTION ==================
-  const buyBigId = buyBatchId ? BigInt(buyBatchId) : undefined;
-  const buyBigTons = buyTons ? BigInt(Math.floor(Number(buyTons))) : 0n;
-
-  const { data: buySaleRaw } = useReadContract({
-    address: CONTRACT_ADDRESSES.MARKETPLACE,
-    abi: MarketplaceABI,
-    functionName: "getBatchSale",
-    args: buyBigId ? [buyBigId] : undefined,
-    enabled: !!buyBigId,
-  });
-
-  const buySale = buySaleRaw
-    ? {
-        seller: buySaleRaw[0] as string,
-        totalTons: buySaleRaw[1] as bigint,
-        availableTons: buySaleRaw[2] as bigint,
-        active: buySaleRaw[3] as boolean,
-      }
-    : null;
-
-  const availableTonsBuy = buySale?.availableTons || 0n;
-  const totalPriceBuy = Number(buyTons || 0) * PRICE_PER_TON;
-
-  const { data: buyTokenURI } = useReadContract({
-    address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
-    abi: GreenNFTABI,
-    functionName: "tokenURI",
-    args: buyBigId ? [buyBigId] : undefined,
-    enabled: !!buyBigId,
-  });
-
-  // ================== DANH SÁCH BATCH ĐANG BÁN ==================
-  const { data: activeBatchIds = [] } = useReadContract({
-    address: CONTRACT_ADDRESSES.MARKETPLACE,
-    abi: MarketplaceABI,
-    functionName: "getActiveBatchSales",
-  });
-
-  const { data: saleInfos } = useReadContract({
-    address: CONTRACT_ADDRESSES.MARKETPLACE,
-    abi: MarketplaceABI,
-    functionName: "getMultipleBatchSales",
-    args: activeBatchIds.length > 0 ? [activeBatchIds] : undefined,
-    enabled: activeBatchIds.length > 0,
-  });
-
-  // ================== FETCH METADATA ==================
-  useEffect(() => {
-    const fetchMetadata = async (uri: string, batchIdStr: string) => {
-      if (!uri || metadataCache[batchIdStr]) return;
-      try {
-        let gatewayURI = uri;
-        if (uri.startsWith("ipfs://")) {
-          gatewayURI = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
-        }
-        const res = await fetch(gatewayURI);
-        if (res.ok) {
-          const meta = await res.json();
-          setMetadataCache((prev) => ({ ...prev, [batchIdStr]: meta }));
-        }
-      } catch (e) {
-        console.error("Fetch metadata error:", e);
-      }
-    };
-
-    if (sellTokenURI) fetchMetadata(sellTokenURI, sellBatchId);
-    if (buyTokenURI) fetchMetadata(buyTokenURI, buyBatchId);
-  }, [sellTokenURI, buyTokenURI, sellBatchId, buyBatchId, metadataCache]);
-
-  // ================== FUNCTIONS ==================
   const approveCCT = () => {
-    if (actualTons === 0n) {
-      alert("Không tìm thấy số tấn từ claim. Kiểm tra lại batch ID.");
-      return;
-    }
     writeContract({
       address: CONTRACT_ADDRESSES.CCT,
       abi: CCTABI,
@@ -200,304 +344,225 @@ export default function MarketplaceSection() {
     });
   };
 
-  const openBatchSale = () => {
-    if (!sellBigId) return;
+  const openSale = () =>
     writeContract({
       address: CONTRACT_ADDRESSES.MARKETPLACE,
       abi: MarketplaceABI,
       functionName: "openBatchSale",
-      args: [sellBigId],
+      args: [sellBigId!],
     });
-  };
 
-  const cancelBatchSale = () => {
-    if (!sellBigId) return;
+  const cancelSale = () =>
     writeContract({
       address: CONTRACT_ADDRESSES.MARKETPLACE,
       abi: MarketplaceABI,
       functionName: "cancelBatchSale",
-      args: [sellBigId],
+      args: [sellBigId!],
     });
-  };
-
-  const buyCredits = () => {
-    if (!buyBigId || buyBigTons <= 0n || buyBigTons > availableTonsBuy) return;
-    writeContract({
-      address: CONTRACT_ADDRESSES.MARKETPLACE,
-      abi: MarketplaceABI,
-      functionName: "buyCredits",
-      args: [buyBigId, buyBigTons],
-      value: parseEther(totalPriceBuy.toFixed(18)),
-    });
-  };
-
-  // Reset form sau thành công
-  useEffect(() => {
-    if (txSuccess) {
-      setTimeout(() => {
-        reset();
-        refetchAllowance();
-        setSellBatchId("");
-        setBuyBatchId("");
-        setBuyTons("");
-      }, 3000);
-    }
-  }, [txSuccess, reset, refetchAllowance]);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-12 py-12 px-6">
-      <h2 className="text-5xl font-bold text-center text-green-800">
-        🌍 Carbon Credit Marketplace
-      </h2>
-
-      {!isConnected && (
-        <div className="text-center bg-red-50 text-red-600 p-8 rounded-2xl text-xl font-semibold">
-          Vui lòng kết nối ví để sử dụng marketplace
-        </div>
-      )}
-
-      {/* Notification */}
-      {txLoading && (
-        <div className="fixed top-4 right-4 bg-blue-600 text-white p-6 rounded-xl shadow-2xl z-50 text-lg">
-          Đang xử lý giao dịch...
-        </div>
-      )}
-      {txSuccess && (
-        <div className="fixed top-4 right-4 bg-green-600 text-white p-6 rounded-xl shadow-2xl z-50 text-lg animate-pulse">
-          ✅ Giao dịch thành công!
-        </div>
-      )}
-      {writeError && (
-        <div className="fixed top-4 right-4 bg-red-600 text-white p-6 rounded-xl shadow-2xl z-50 text-lg">
-          Lỗi: {(writeError as any).shortMessage || "Giao dịch thất bại"}
-        </div>
-      )}
-
-      {/* DANH SÁCH BATCH ĐANG BÁN */}
-      <div className="bg-gradient-to-br from-green-50 to-cyan-50 p-10 rounded-3xl shadow-xl">
-        <h3 className="text-4xl font-bold text-green-800 mb-8">
-          Batch đang mở bán ({activeBatchIds.length})
-        </h3>
-        {activeBatchIds.length === 0 ? (
-          <p className="text-gray-600 italic text-xl">
-            Chưa có batch nào đang bán
-          </p>
-        ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {activeBatchIds.map((id, i) => {
-              const sale = saleInfos?.[i];
-              if (!sale || !sale.active) return null;
-              const tons = Number(sale.availableTons);
-              const price = tons * PRICE_PER_TON;
-              return (
-                <div
-                  key={id.toString()}
-                  className="bg-white p-8 rounded-2xl shadow-xl hover:shadow-2xl transition duration-300"
-                >
-                  <h4 className="font-bold text-2xl mb-2">
-                    Batch #{id.toString()}
-                  </h4>
-                  <p className="text-4xl font-bold text-green-600">
-                    {tons} tấn
-                  </p>
-                  <p className="text-2xl text-blue-600 mt-2">
-                    Giá: {price.toFixed(3)} ETH
-                  </p>
-                  <p className="text-sm text-gray-600 mt-3">
-                    Seller: {sale.seller.slice(0, 8)}...{sale.seller.slice(-6)}
-                  </p>
-                  <button
-                    onClick={() => {
-                      setBuyBatchId(id.toString());
-                      setBuyTons("");
-                    }}
-                    className="mt-6 w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition"
-                  >
-                    Xem chi tiết & Mua
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
+    <div className=" mx-auto py-12 px-6">
+      {/* Header và Tabs giữ nguyên như phiên bản trước */}
+      <div className="text-center mb-12">
+        <h1 className="text-5xl font-bold text-green-800 mb-4">
+          🌍 Carbon Credit Marketplace
+        </h1>
+        <p className="text-xl text-gray-600">
+          Buy and sell verified, tokenized carbon credits from audited projects
+        </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-12">
-        {/* ================== BÁN BATCH ================== */}
-        <div className="bg-white rounded-3xl shadow-2xl p-10 border-4 border-green-400">
-          <h3 className="text-4xl font-bold text-green-700 mb-8">
-            Mở bán toàn bộ Batch
-          </h3>
-          <input
-            type="number"
-            placeholder="Batch Token ID"
-            value={sellBatchId}
-            onChange={(e) => setSellBatchId(e.target.value)}
-            className="w-full p-5 border-2 border-gray-300 rounded-xl text-xl mb-8 focus:border-green-500 focus:outline-none"
-            disabled={!isConnected}
-          />
-
-          {sellBigId && !isSellOwner && (
-            <p className="text-red-600 font-bold text-xl mb-6">
-              ❌ Bạn không sở hữu batch này
-            </p>
-          )}
-
-          {sellBigId && isSellOwner && actualTons > 0n && (
-            <div className="bg-green-50 p-8 rounded-2xl mb-8">
-              <p className="text-3xl font-bold text-green-800">
-                Số tấn từ audit: {Number(actualTons)} tấn
-              </p>
-              {sellSale && (
-                <p className="text-2xl mt-4">
-                  Trạng thái:{" "}
-                  {sellSale.active
-                    ? `Đang bán (còn ${Number(sellSale.availableTons)} tấn)`
-                    : "Chưa mở bán"}
-                </p>
-              )}
-              {metadataCache[sellBatchId] && (
-                <div className="mt-6 p-6 bg-white rounded-xl">
-                  <p className="font-bold text-xl">
-                    {metadataCache[sellBatchId].name || "Batch Certificate"}
-                  </p>
-                  <p className="text-gray-700 mt-2">
-                    {metadataCache[sellBatchId].description}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Approve */}
-          {isSellOwner &&
-            actualTons > 0n &&
-            !hasEnoughAllowance &&
-            !sellSale?.active && (
-              <button
-                onClick={approveCCT}
-                disabled={txLoading}
-                className="w-full bg-orange-500 text-white py-6 rounded-xl font-bold text-2xl hover:bg-orange-600 disabled:opacity-60"
-              >
-                {txLoading
-                  ? "Đang approve..."
-                  : `1. Approve ${Number(actualTons)} CCT`}
-              </button>
-            )}
-
-          {/* Mở bán */}
-          {isSellOwner &&
-            actualTons > 0n &&
-            hasEnoughAllowance &&
-            !sellSale?.active && (
-              <button
-                onClick={openBatchSale}
-                disabled={txLoading}
-                className="w-full bg-green-600 text-white py-6 rounded-xl font-bold text-2xl hover:bg-green-700 disabled:opacity-60 mt-4"
-              >
-                {txLoading ? "Đang mở bán..." : "2. Mở bán toàn bộ batch"}
-              </button>
-            )}
-
-          {/* Hủy bán */}
-          {isSellOwner && sellSale?.active && (
-            <button
-              onClick={cancelBatchSale}
-              disabled={txLoading}
-              className="w-full bg-red-600 text-white py-6 rounded-xl font-bold text-2xl hover:bg-red-700 disabled:opacity-60 mt-4"
-            >
-              {txLoading ? "Đang hủy..." : "Hủy bán batch"}
-            </button>
-          )}
+      {!isConnected && (
+        <div className="text-center bg-amber-50 border border-amber-300 text-amber-800 p-8 rounded-2xl text-xl font-medium mb-10">
+          Please connect your wallet to access the marketplace
         </div>
+      )}
 
-        {/* ================== MUA LẺ ================== */}
-        <div className="bg-white rounded-3xl shadow-2xl p-10 border-4 border-blue-400">
-          <h3 className="text-4xl font-bold text-blue-700 mb-8">
-            Mua Carbon Credits
-          </h3>
-          <input
-            type="number"
-            placeholder="Batch Token ID"
-            value={buyBatchId}
-            onChange={(e) => setBuyBatchId(e.target.value)}
-            className="w-full p-5 border-2 border-gray-300 rounded-xl text-xl mb-6 focus:border-blue-500 focus:outline-none"
-            disabled={!isConnected}
-          />
-          <input
-            type="number"
-            min="0.000001"
-            step="0.000001"
-            placeholder="Số tấn muốn mua"
-            value={buyTons}
-            onChange={(e) => setBuyTons(e.target.value)}
-            className="w-full p-5 border-2 border-gray-300 rounded-xl text-xl mb-8 focus:border-blue-500 focus:outline-none"
-            disabled={!isConnected || !buySale?.active}
-          />
-
-          {buySale && buySale.active && (
-            <div className="bg-blue-50 p-8 rounded-2xl mb-8">
-              <p className="text-3xl font-bold text-green-700">
-                Còn lại: {Number(availableTonsBuy)} tấn
-              </p>
-              <p className="text-3xl font-bold text-blue-600 mt-4">
-                Tổng tiền: {totalPriceBuy.toFixed(4)} ETH
-              </p>
-              <p className="text-lg mt-4 text-gray-700">
-                Seller: {buySale.seller.slice(0, 10)}...
-                {buySale.seller.slice(-8)}
-              </p>
-              {metadataCache[buyBatchId] && (
-                <div className="mt-6 p-6 bg-white rounded-xl">
-                  <p className="font-bold text-2xl">
-                    {metadataCache[buyBatchId].name}
-                  </p>
-                  <p className="text-gray-700 mt-3">
-                    {metadataCache[buyBatchId].description}
-                  </p>
-                  {metadataCache[buyBatchId].image && (
-                    <img
-                      src={metadataCache[buyBatchId].image!.replace(
-                        "ipfs://",
-                        "https://ipfs.io/ipfs/"
-                      )}
-                      alt="Certificate"
-                      className="mt-6 rounded-xl w-full shadow-lg"
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {buyBatchId && !buySale?.active && (
-            <p className="text-red-600 font-bold text-xl mb-6">
-              Batch này không đang bán
-            </p>
-          )}
-          {buyBigTons > availableTonsBuy && buyBigTons > 0n && (
-            <p className="text-red-600 font-bold text-xl mb-6">
-              Số tấn vượt quá còn lại
-            </p>
-          )}
-
+      {/* Tabs */}
+      <div className="flex justify-center mb-12">
+        <div className="bg-gray-100 p-1 rounded-xl inline-flex">
           <button
-            onClick={buyCredits}
-            disabled={
-              !isConnected ||
-              !buySale?.active ||
-              buyBigTons <= 0n ||
-              buyBigTons > availableTonsBuy ||
-              txLoading
-            }
-            className="w-full bg-blue-600 text-white py-7 rounded-xl font-bold text-3xl hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            onClick={() => setActiveTab("available")}
+            className={`px-8 py-3 rounded-lg font-semibold transition ${
+              activeTab === "available"
+                ? "bg-white text-green-700 shadow-md"
+                : "text-gray-600"
+            }`}
           >
-            {txLoading
-              ? "Đang mua..."
-              : `Mua ${buyTons || 0} tấn (${totalPriceBuy.toFixed(4)} ETH)`}
+            Available Bundles ({activeBatchIds.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("myListings")}
+            className={`px-8 py-3 rounded-lg font-semibold transition ${
+              activeTab === "myListings"
+                ? "bg-white text-green-700 shadow-md"
+                : "text-gray-600"
+            }`}
+          >
+            My Listings
+          </button>
+          <button
+            onClick={() => setActiveTab("history")}
+            className={`px-8 py-3 rounded-lg font-semibold transition ${
+              activeTab === "history"
+                ? "bg-white text-green-700 shadow-md"
+                : "text-gray-600"
+            }`}
+          >
+            Purchase History
           </button>
         </div>
       </div>
+
+      {/* Tab: Available Bundles */}
+      {activeTab === "available" && (
+        <div>
+          {activeBatchIds.length === 0 ? (
+            <div className="text-center py-20">
+              <p className="text-3xl text-gray-500">
+                No bundles currently available
+              </p>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {activeBatchIds.map((id, i) => {
+                const sale = salesData?.[i];
+                if (!sale || !sale[3]) return null;
+                const tons = Number(formatUnits(sale[2] as bigint, 0));
+                const price = tons * PRICE_PER_TON;
+                const meta = metadataCache[id.toString()];
+
+                return (
+                  <div
+                    key={id.toString()}
+                    onClick={() => setSelectedBundle(id)}
+                    className="bg-white rounded-3xl shadow-xl overflow-hidden hover:shadow-2xl transition cursor-pointer"
+                  >
+                    {meta?.image && (
+                      <img
+                        src={meta.image.replace(
+                          "ipfs://",
+                          "https://ipfs.io/ipfs/"
+                        )}
+                        alt="Bundle"
+                        className="w-full h-48 object-cover"
+                      />
+                    )}
+                    <div className="p-6">
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">
+                        {meta?.name || `Bundle #${id}`}
+                      </h3>
+                      <p className="text-3xl font-bold text-green-600">
+                        {tons.toFixed(6)} tons
+                      </p>
+                      <p className="text-2xl font-semibold text-blue-600">
+                        {price.toFixed(6)} ETH
+                      </p>
+                      <button className="mt-6 w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-bold">
+                        View & Buy
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: My Listings (phần bán) */}
+      {activeTab === "myListings" && (
+        <div className="bg-white rounded-3xl shadow-2xl p-10">
+          <h2 className="text-3xl font-bold text-green-800 mb-8">
+            List Your Verified Bundle
+          </h2>
+          <input
+            type="number"
+            placeholder="Enter your Bundle Token ID"
+            value={sellBundleId}
+            onChange={(e) => setSellBundleId(e.target.value)}
+            className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-xl mb-6 focus:border-green-500"
+            disabled={!isConnected}
+          />
+
+          {sellBigId && !isOwner && (
+            <p className="text-red-600 font-bold text-xl">
+              You do not own this bundle
+            </p>
+          )}
+
+          {sellBigId && isOwner && actualTons > 0n && (
+            <div className="bg-green-50 p-8 rounded-2xl mb-8">
+              <p className="text-2xl font-bold text-green-800">
+                Verified: {Number(formatUnits(actualTons, 0)).toFixed(2)} tons
+                CO₂e
+              </p>
+              {saleInfo && (
+                <p className="text-lg mt-4">
+                  Status:{" "}
+                  {saleInfo.active
+                    ? `On sale (${Number(
+                        formatUnits(saleInfo.availableTons, 0)
+                      )} tons left)`
+                    : "Not listed"}
+                </p>
+              )}
+            </div>
+          )}
+
+          {isOwner &&
+            actualTons > 0n &&
+            !hasEnoughAllowance &&
+            !saleInfo?.active && (
+              <button
+                onClick={approveCCT}
+                disabled={txLoading}
+                className="w-full bg-orange-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+              >
+                {txLoading ? "Approving..." : "1. Approve CCT for Marketplace"}
+              </button>
+            )}
+
+          {isOwner && hasEnoughAllowance && !saleInfo?.active && (
+            <button
+              onClick={openSale}
+              disabled={txLoading}
+              className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+            >
+              {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
+            </button>
+          )}
+
+          {isOwner && saleInfo?.active && (
+            <button
+              onClick={cancelSale}
+              disabled={txLoading}
+              className="w-full bg-red-600 text-white py-5 rounded-xl font-bold text-xl"
+            >
+              {txLoading ? "Cancelling..." : "Cancel Listing"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Purchase History (placeholder) */}
+      {activeTab === "history" && (
+        <div className="bg-white rounded-3xl shadow-xl p-10 text-center py-20">
+          <p className="text-3xl text-gray-500">
+            Your purchase history will appear here
+          </p>
+          <p className="text-lg text-gray-400 mt-4">
+            (Coming soon with transaction indexing)
+          </p>
+        </div>
+      )}
+      {/* Modal */}
+      {selectedBundle && (
+        <BundleDetailModal
+          batchId={selectedBundle}
+          onClose={() => setSelectedBundle(null)}
+        />
+      )}
     </div>
   );
 }

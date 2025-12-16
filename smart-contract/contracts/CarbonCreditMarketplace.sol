@@ -127,6 +127,7 @@ contract CarbonCreditMarketplace {
 
         BatchSale storage sale = batchSales[batchTokenId];
         require(sale.active, "Not on sale");
+        require(msg.sender != sale.seller, "Seller cannot buy own batch");
         require(tons <= sale.availableTons, "Not enough available");
 
         uint256 totalPrice = tons * PRICE_PER_TON;

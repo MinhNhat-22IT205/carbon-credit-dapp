@@ -1,0 +1,10 @@
+await cert.hasRole(MINTER_ROLE, cct);
+const tx = await cert.grantRole(MINTER_ROLE, cct);await tx.wait();
+const MINTER_ROLE = ethers.keccak256(  ethers.toUtf8Bytes("MINTER_ROLE"));
+const cct = "0x5a3D0115Ed7120D274335e958e4809F7Ce1AF7f1"
+cert = await ethers.getContractAt(  "RetirementCertificate",  "0x2e193E663d2f60949C08a53E68A5a6251dEd981B");
+const cert = await ethers.getContractAt(  "RetirementCertificate",  "0x2e193E663d2f60949C08a53E68A5a6251dEd981B");
+);
+  "0xRETIREMENT_CERT_ADDRESS"
+  "RetirementCertificate",
+const cert = await ethers.getContractAt(

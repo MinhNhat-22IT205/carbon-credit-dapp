@@ -29,8 +29,7 @@ type ProjectStruct = {
 // ============================================================================
 // IPFS SERVICE - Using Pinata
 // ============================================================================
-const PINATA_JWT =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI5OTNlZjk2Ny0xNWYwLTQ1NjAtODcxYS00ZDRmNjM0MDc1MmUiLCJlbWFpbCI6Im5oYXRtaW5obGVkYW8yMDA0QGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJwaW5fcG9saWN5Ijp7InJlZ2lvbnMiOlt7ImRlc2lyZWRSZXBsaWNhdGlvbkNvdW50IjoxLCJpZCI6IkZSQTEifSx7ImRlc2lyZWRSZXBsaWNhdGlvbkNvdW50IjoxLCJpZCI6Ik5ZQzEifV0sInZlcnNpb24iOjF9LCJtZmFfZW5hYmxlZCI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9LCJhdXRoZW50aWNhdGlvblR5cGUiOiJzY29wZWRLZXkiLCJzY29wZWRLZXlLZXkiOiI5NzdkZjAxM2EzMGNmM2I3OGU3NSIsInNjb3BlZEtleVNlY3JldCI6Ijc4NTZkOTA5MGJhMTgyYTQwZWJiYmNkMzRhMmY3Mzk5YWE4NWYxNDE1ODI3ZjBhZDkzMzIyZWQzMDEyMmEyYWMiLCJleHAiOjE3OTY1MTc5MjB9.5YHMne_ORNXqhu8BKydvtCJjD5C1F4S0TaGLI5F2i3s";
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT as string | undefined;
 
 async function uploadToPinata(files: File[], claimId: string): Promise<string> {
   if (!PINATA_JWT) {
@@ -187,25 +186,16 @@ export default function AuditorDashboard() {
       const coverFile = files.find((f) =>
         /\.(jpg|jpeg|png|gif|webp)$/i.test(f.name)
       );
+      const certificateFile = files.find((f) =>
+        /\.(pdf|docx|doc|txt|jpg|jpeg|png|gif|webp)$/i.test(f.name)
+      );
       const imagePath = coverFile ? `${coverFile.name}` : "";
 
       const metadataContent = {
         name: `Green Carbon Batch #${claimIdStr} - ${project.name} ${vintageYear}`,
         description: `Chứng nhận giảm phát thải ${claim.reductionTons} tấn CO₂e đã được audit độc lập.\nDự án: ${project.name}\nKỳ: ${periodStartDate} - ${periodEndDate}.`,
-        image: imagePath ? `ipfs://${imagePath}` : "",
-        external_url: files.find(
-          (f) =>
-            f.name.toLowerCase().includes("audit") ||
-            f.name.toLowerCase().includes("report")
-        )
-          ? `ipfs://${
-              files.find(
-                (f) =>
-                  f.name.toLowerCase().includes("audit") ||
-                  f.name.toLowerCase().includes("report")
-              )?.name
-            }`
-          : "",
+        // image: imagePath ? `ipfs://${imagePath}` : "",
+        certificate: certificateFile ? `ipfs://${certificateFile.name}` : "",
         attributes: [
           { trait_type: "Project ID", value: claim.projectId.toString() },
           { trait_type: "Project Name", value: project.name },
@@ -218,7 +208,10 @@ export default function AuditorDashboard() {
             trait_type: "Period",
             value: `${periodStartDate} - ${periodEndDate}`,
           },
-          { trait_type: "Evidence IPFS", value: claim.evidenceIPFS },
+          {
+            trait_type: "Evidence IPFS",
+            value: "ipfs://" + claim.evidenceIPFS,
+          },
         ],
       };
 
@@ -240,7 +233,7 @@ export default function AuditorDashboard() {
         address: CONTRACT_ADDRESSES.REGISTRY,
         abi: RegistryABI,
         functionName: "auditAndIssue",
-        args: [BigInt(claimIdStr), `ipfs://${folderCID}/metadata.json`],
+        args: [BigInt(claimIdStr), `${folderCID}`],
       });
     } catch (error: any) {
       console.error("Audit error:", error);
@@ -272,21 +265,15 @@ export default function AuditorDashboard() {
     });
   };
 
-  /* ---------- Quick audit (for testing) ---------- */
-  const quickAudit = (claimIdStr: string) => {
-    writeContract({
-      address: CONTRACT_ADDRESSES.REGISTRY,
-      abi: RegistryABI,
-      functionName: "auditAndIssue",
-      args: [BigInt(claimIdStr), "QmTestHash123456789"],
-    });
-  };
-
   return (
-    <div className="bg-white rounded-xl shadow-md p-6">
-      <h2 className="text-2xl font-bold mb-6 text-purple-800">
-        Auditor Dashboard
+    <div className="bg-white rounded-2xl shadow-xl p-8 border border-purple-200">
+      <h2 className="text-2xl font-bold mb-2 text-purple-800">
+        Auditor – Claims Review
       </h2>
+      <p className="text-sm text-gray-600 mb-6">
+        Review evidence, upload audit packages, and issue or reject climate
+        bundles.
+      </p>
 
       {/* IPFS Configuration Notice */}
       {!PINATA_JWT && (
@@ -306,30 +293,6 @@ export default function AuditorDashboard() {
           </p>
         </div>
       )}
-
-      {/* ---------- Quick Audit (Testing) ---------- */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-        <h3 className="font-semibold mb-3">Quick Audit (Testing)</h3>
-        <div className="flex gap-3">
-          <input
-            type="number"
-            value={claimId}
-            onChange={(e) => setClaimId(e.target.value)}
-            className="flex-1 px-4 py-2 border rounded-lg"
-            placeholder="Enter claim ID"
-          />
-          <button
-            onClick={() => quickAudit(claimId)}
-            disabled={txPending || !claimId}
-            className="bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50"
-          >
-            {txPending ? "Processing..." : "Quick Audit"}
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-2">
-          ℹ️ Uses test IPFS hash - for development only
-        </p>
-      </div>
 
       {claim && claim.batchTokenId > 0n && (
         <BatchNFTCard

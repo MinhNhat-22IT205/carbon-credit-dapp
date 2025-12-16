@@ -5,6 +5,7 @@ import {
   useReadContracts,
   useWriteContract,
 } from "wagmi";
+import { Link } from "react-router-dom";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
@@ -38,8 +39,7 @@ type NFTMetadata = {
 // ============================================================================
 // IPFS SERVICE - Pinata (dùng chung với AuditorDashboard)
 // ============================================================================
-const PINATA_JWT =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI5OTNlZjk2Ny0xNWYwLTQ1NjAtODcxYS00ZDRmNjM0MDc1MmUiLCJlbWFpbCI6Im5oYXRtaW5obGVkYW8yMDA0QGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJwaW5fcG9saWN5Ijp7InJlZ2lvbnMiOlt7ImRlc2lyZWRSZXBsaWNhdGlvbkNvdW50IjoxLCJpZCI6IkZSQTEifSx7ImRlc2lyZWRSZXBsaWNhdGlvbkNvdW50IjoxLCJpZCI6Ik5ZQzEifV0sInZlcnNpb24iOjF9LCJtZmFfZW5hYmxlZCI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9LCJhdXRoZW50aWNhdGlvblR5cGUiOiJzY29wZWRLZXkiLCJzY29wZWRLZXlLZXkiOiI5NzdkZjAxM2EzMGNmM2I3OGU3NSIsInNjb3BlZEtleVNlY3JldCI6Ijc4NTZkOTA5MGJhMTgyYTQwZWJiYmNkMzRhMmY3Mzk5YWE4NWYxNDE1ODI3ZjBhZDkzMzIyZWQzMDEyMmEyYWMiLCJleHAiOjE3OTY1MTc5MjB9.5YHMne_ORNXqhu8BKydvtCJjD5C1F4S0TaGLI5F2i3s"; // Đảm bảo đã set trong .env
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT as string | undefined;
 async function uploadEvidenceToPinata(
   files: File[],
   projectId: string
@@ -101,6 +101,15 @@ export default function ClaimSection() {
   const [reductionTons, setReductionTons] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
+  const [tab, setTab] = useState<
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "onsale"
+    | "sold"
+    | "cancelled"
+    | "all"
+  >("all");
 
   // Upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -115,7 +124,9 @@ export default function ClaimSection() {
     abi: RegistryABI,
     functionName: "getProject",
     args: projectId ? [BigInt(projectId)] : undefined,
-    enabled: !!projectId,
+    query: {
+      enabled: !!projectId,
+    },
   }) as { data?: ProjectStruct };
 
   /* ---------- User projects & claims ---------- */
@@ -222,21 +233,22 @@ export default function ClaimSection() {
     }
   };
 
-  const auditedClaims = claims
-    ?.map((item: any, index: number) => {
-      const claim = item?.result as ClaimStruct | undefined;
-      if (claim && claim.status !== 0n && claim.batchTokenId > 0n) {
-        return {
-          claimId: allClaimIds[index],
-          batchTokenId: claim.batchTokenId,
-        };
-      }
-      return null;
-    })
-    .filter(Boolean);
+  const auditedClaims =
+    claims
+      ?.map((item, index: number) => {
+        const claim = item?.result as ClaimStruct | undefined;
+        if (claim && claim.status !== 0n && claim.batchTokenId > 0n) {
+          return {
+            claimId: allClaimIds[index],
+            batchTokenId: claim.batchTokenId,
+          };
+        }
+        return null;
+      })
+      .filter(Boolean) || [];
 
   const tokenURIContracts =
-    auditedClaims?.map((ac: any) => ({
+    auditedClaims.map((ac) => ({
       address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION, // Thêm address GreenNFT vào addresses.ts
       abi: GreenNFTABI,
       functionName: "tokenURI",
@@ -255,56 +267,113 @@ export default function ClaimSection() {
   // Fetch metadata khi có tokenURI
   useEffect(() => {
     const fetchMetadatas = async () => {
-      if (!tokenURIs) return;
+      if (!tokenURIs || auditedClaims.length === 0) return;
       console.log(tokenURIs);
 
       const newMetadatas: Record<string, NFTMetadata | null> = {};
       for (let i = 0; i < tokenURIs.length; i++) {
         const uriResult = tokenURIs[i]?.result as string | undefined;
         if (!uriResult) {
-          newMetadatas[auditedClaims![i].claimId.toString()] = null;
+          newMetadatas[auditedClaims[i].claimId.toString()] = null;
           continue;
         }
 
         // Chuyển ipfs:// thành gateway (Pinata nhanh & ổn định)
         let metadataUrl = uriResult;
         if (uriResult.startsWith("ipfs://")) {
-          metadataUrl = `https://gateway.pinata.cloud/ipfs/${uriResult.slice(
+          metadataUrl = `https://ipfs.io/ipfs/${uriResult.slice(
             7
-          )}`;
+          )}/metadata.json`;
+          console.log(uriResult);
         } else if (uriResult.includes("ipfs/")) {
-          metadataUrl = `https://gateway.pinata.cloud/${uriResult}`;
+          metadataUrl = `https://ipfs.io/ipfs/${uriResult}/metadata.json`;
         }
 
         try {
           const res = await fetch(metadataUrl);
           if (res.ok) {
-            const json = await res.json();
-            newMetadatas[auditedClaims![i].claimId.toString()] = json;
+            const json = (await res.json()) as NFTMetadata;
+            newMetadatas[auditedClaims[i].claimId.toString()] = json;
           } else {
-            newMetadatas[auditedClaims![i].claimId.toString()] = null;
+            newMetadatas[auditedClaims[i].claimId.toString()] = null;
           }
         } catch (err) {
           console.error("Fetch metadata error:", err);
-          newMetadatas[auditedClaims![i].claimId.toString()] = null;
+          newMetadatas[auditedClaims[i].claimId.toString()] = null;
         }
       }
       setNftMetadatas(newMetadatas);
     };
 
     fetchMetadatas();
-  }, [tokenURIs]);
+  }, [tokenURIs, auditedClaims]);
+
+  const statusLabel = (status: bigint) => {
+    switch (Number(status)) {
+      case 0:
+        return "Pending";
+      case 1:
+        return "Approved";
+      case 2:
+        return "Rejected";
+      case 3:
+        return "On Sale";
+      case 4:
+        return "Sold";
+      case 5:
+        return "Cancelled";
+      default:
+        return "Unknown";
+    }
+  };
+
+  const selectedStatus =
+    tab === "approved"
+      ? [1]
+      : tab === "pending"
+      ? [0]
+      : tab === "rejected"
+      ? [2]
+      : tab === "sold"
+      ? [4]
+      : tab === "onsale"
+      ? [3]
+      : tab === "cancelled"
+      ? [5]
+      : [0, 1, 2, 3, 4, 5];
+
+  const enrichedClaims =
+    claims
+      ?.map((item, index: number) => {
+        const claim = item?.result as ClaimStruct | undefined;
+        const claimId = allClaimIds[index];
+        if (!claim || !claimId) return null;
+        return { claim, claimId };
+      })
+      .filter(Boolean) || [];
+
+  const filteredClaims = enrichedClaims.filter(({ claim }) =>
+    selectedStatus.includes(Number(claim.status))
+  );
 
   return (
     <div className="bg-white rounded-2xl shadow-xl p-8 border border-blue-200">
-      <h2 className="text-2xl font-bold text-blue-800 mb-8">
-        Submit CO₂ Reduction Claim
-      </h2>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-blue-800">
+            Project Owner – Claims
+          </h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Submit new reduction claims and track their lifecycle across audits
+            and market.
+          </p>
+        </div>
+      </div>
 
-      <div className="grid md:grid-cols-2 gap-8">
+      <div className="grid lg:grid-cols-2 gap-10">
         {/* ---------- Submit form ---------- */}
         <div>
-          <h3 className="text-xl font-semibold mb-5">Submit New Claim</h3>
+          <h3 className="text-lg font-semibold mb-4">Submit New Claim</h3>
 
           <input
             type="number"
@@ -414,34 +483,71 @@ export default function ClaimSection() {
           </p>
         </div>
 
-        {/* ---------- Claims list (giữ nguyên) ---------- */}
+        {/* ---------- Claims list with status tabs ---------- */}
         <div>
-          <h3 className="text-xl font-semibold mb-4">Your Submitted Claims</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Your Claims</h3>
+          </div>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {[
+              { id: "pending", label: "Pending" },
+              { id: "approved", label: "Approved" },
+              { id: "rejected", label: "Rejected" },
+              { id: "onsale", label: "On Sale" },
+              { id: "sold", label: "Sold" },
+              { id: "cancelled", label: "Cancelled" },
+              { id: "all", label: "All" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id as typeof tab)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                  tab === t.id
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-blue-50"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
 
-          {claims && claims.length > 0 ? (
-            <div className="space-y-6">
-              {claims.map((item: any, index: number) => {
-                const claim = item?.result as ClaimStruct | undefined;
-                if (!claim) return null;
-
-                const claimIdStr = allClaimIds[index].toString();
+          {filteredClaims.length > 0 ? (
+            <div className="space-y-4 max-h-[540px] overflow-y-auto pr-1">
+              {filteredClaims.map(({ claim, claimId }) => {
+                const claimIdStr = claimId.toString();
                 const metadata = nftMetadatas[claimIdStr];
 
                 return (
                   <div
                     key={claimIdStr}
-                    className={`p-6 rounded-xl border-2 ${
+                    className={`p-5 rounded-xl border ${
                       claim.status === 0n
-                        ? "bg-yellow-50 border-yellow-400"
-                        : "bg-gradient-to-r from-green-50 to-emerald-50 border-green-500"
-                    } shadow-md`}
+                        ? "bg-yellow-50/70 border-yellow-300"
+                        : "bg-slate-50 border-slate-200"
+                    } shadow-sm`}
                   >
-                    <div className="grid md:grid-cols-2 gap-6">
+                    <div className="grid md:grid-cols-2 gap-4">
                       {/* Left: Basic info */}
                       <div>
-                        <p className="text-xl font-bold text-purple-800">
-                          Claim #{claimIdStr}
-                        </p>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-sm font-semibold text-slate-900">
+                            Claim #{claimIdStr}
+                          </p>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full ${
+                              claim.status === 0n
+                                ? "bg-amber-100 text-amber-800"
+                                : claim.status === 1n
+                                ? "bg-emerald-100 text-emerald-800"
+                                : claim.status === 4n
+                                ? "bg-sky-100 text-sky-800"
+                                : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {statusLabel(claim.status)}
+                          </span>
+                        </div>
                         <p className="mt-2">
                           <strong>Reduction:</strong>{" "}
                           <span className="text-green-700 font-bold">
@@ -458,84 +564,46 @@ export default function ClaimSection() {
                             Number(claim.periodEnd) * 1000
                           ).toLocaleDateString()}
                         </p>
-                        <p>
-                          <strong>Status:</strong>{" "}
-                          <span
-                            className={
-                              claim.status === 0n
-                                ? "text-orange-600"
-                                : "text-green-600"
-                            }
-                          >
-                            {(() => {
-                              // Status enum mapping order (0-5): Pending, Audited, Rejected, OnSale, Sold, Cancelled
-                              switch (Number(claim.status)) {
-                                case 0:
-                                  return "Pending Audit";
-                                case 1:
-                                  return "Audited & Issued";
-                                case 2:
-                                  return "Rejected";
-                                case 3:
-                                  return "On Sale";
-                                case 4:
-                                  return "Sold";
-                                case 5:
-                                  return "Cancelled";
-                                default:
-                                  return "Unknown";
-                              }
-                            })()}
-                          </span>
-                        </p>
-
                         {claim.evidenceIPFS &&
                           claim.evidenceIPFS !== "QmNoEvidenceProvided" && (
-                            <p className="mt-3">
+                            <div className="mt-3">
+                              <p className="text-xs text-gray-500 mb-1">
+                                Evidence (IPFS folder)
+                              </p>
                               <a
                                 href={`https://ipfs.io/ipfs/${claim.evidenceIPFS}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline"
+                                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline break-all"
                               >
-                                📄 View Evidence Folder →
+                                <span className="text-base">📂</span>
+                                <span>
+                                  {claim.evidenceIPFS.slice(0, 16)}...
+                                  {claim.evidenceIPFS.slice(-6)}
+                                </span>
                               </a>
-                            </p>
+                            </div>
                           )}
                       </div>
 
-                      {/* Right: NFT Detail nếu đã audit */}
+                      {/* Right: Issued Verified Batch (NFT) */}
                       {claim.status !== 0n && claim.batchTokenId > 0n && (
-                        <div className="space-y-3">
-                          <p className="font-semibold text-green-800">
-                            ✅ Certificate NFT Issued (Token ID:{" "}
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold text-emerald-800">
+                            ✅ Verified Batch issued (Token ID:{" "}
                             {claim.batchTokenId.toString()})
                           </p>
 
                           {metadata ? (
                             <>
-                              {metadata.image && (
-                                <img
-                                  src={
-                                    metadata.image.startsWith("ipfs://")
-                                      ? `https://gateway.pinata.cloud/ipfs/${metadata.image.slice(
-                                          7
-                                        )}`
-                                      : metadata.image
-                                  }
-                                  alt="NFT Cover"
-                                  className="w-full max-w-sm rounded-lg shadow-lg"
-                                />
-                              )}
-
-                              <p className="font-bold text-lg">
-                                {metadata.name || "Green Carbon Batch"}
+                              <p className="font-semibold text-sm">
+                                {metadata.name || "Verified Batch"}
                               </p>
-                              <p className="text-sm text-gray-700">
+                              <p className="text-xs text-gray-600 line-clamp-3">
                                 {metadata.description}
                               </p>
 
-                              {metadata.attributes &&
+                              {/* {metadata.attributes &&
                                 metadata.attributes.length > 0 && (
                                   <div className="mt-4">
                                     <p className="font-semibold">Attributes:</p>
@@ -551,24 +619,14 @@ export default function ClaimSection() {
                                       ))}
                                     </div>
                                   </div>
-                                )}
+                                )} */}
 
-                              {metadata.external_url && (
-                                <a
-                                  href={
-                                    metadata.external_url.startsWith("ipfs://")
-                                      ? `https://gateway.pinata.cloud/ipfs/${metadata.external_url.slice(
-                                          7
-                                        )}`
-                                      : metadata.external_url
-                                  }
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-block mt-3 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
-                                >
-                                  📑 View Full Audit Report
-                                </a>
-                              )}
+                              <Link
+                                to={`/claims/${claimIdStr}`}
+                                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white! hover:bg-blue-700"
+                              >
+                                View verified batch details
+                              </Link>
                             </>
                           ) : (
                             <p className="text-gray-500 italic">

@@ -1,51 +1,29 @@
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount } from "wagmi";
-import ProjectSection from "./components/ProjectSection";
-import ClaimSection from "./components/ClaimSection";
-import AuditorDashboard from "./components/AuditorDashboard";
-import MarketplaceSection from "./components/MarketplaceSection";
-import { useIsAuditor } from "./hooks/useUserRoles";
-import AddAuditorButton from "./components/AddAuditorButton";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { MainLayout } from "./layout/MainLayout";
+import ProjectsPage from "./pages/ProjectsPage";
+import ClaimsPage from "./pages/ClaimsPage";
+import ClaimDetailPage from "./pages/ClaimDetailPage";
+import MarketPage from "./pages/MarketPage";
+import RetirePage from "./pages/RetirePage";
+import AuditPage from "./pages/AuditPage";
+import AdminAddAuditorPage from "./pages/AdminAddAuditorPage";
 
 function App() {
-  const { address, isConnected } = useAccount();
-  const isAuditor = useIsAuditor(address);
-
-  console.log("isAuditor", isAuditor);
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100">
-      <header className="bg-white shadow-md border-b">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-green-800">
-            🌿 GreenCarbon Platform
-          </h1>
-          <ConnectButton />
-        </div>
-        <AddAuditorButton />
-      </header>
-
-      <main className="max-w-7xl mx-auto px-6 py-10">
-        {!isConnected ? (
-          <div className="text-center py-20">
-            <h2 className="text-4xl font-bold text-gray-800 mb-6">
-              Welcome to Carbon Credit Future
-            </h2>
-            <p className="text-xl text-gray-600">
-              Connect wallet to register projects, verify reductions, and trade
-              credits.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-12">
-            <ProjectSection />
-            <ClaimSection />
-            {isAuditor && <AuditorDashboard />}
-            <MarketplaceSection />
-          </div>
-        )}
-      </main>
-    </div>
+    <BrowserRouter>
+      <MainLayout>
+        <Routes>
+          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/claims" element={<ClaimsPage />} />
+          <Route path="/claims/:claimId" element={<ClaimDetailPage />} />
+          <Route path="/market" element={<MarketPage />} />
+          <Route path="/retire" element={<RetirePage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/admin/add-auditor" element={<AdminAddAuditorPage />} />
+        </Routes>
+      </MainLayout>
+    </BrowserRouter>
   );
 }
 

@@ -191,7 +191,7 @@ contract CarbonCreditRegistry is AccessControlEnumerable {
         batchToClaimId[batchTokenId] = claimId;
 
         // Mint CCT = số tấn giảm được
-        cct.mint(projects[claim.projectId].owner, claim.reductionTons * 1e18); // 1e18 = 1 CCT
+        cct.mint(projects[claim.projectId].owner, claim.reductionTons);
 
         emit ClaimAudited(claimId, claim.reductionTons, batchTokenId);
         return batchTokenId;
