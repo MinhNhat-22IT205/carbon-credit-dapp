@@ -21,7 +21,7 @@
     - **Hardhat local node** (dev local, không cần testnet), hoặc
     - **Sepolia testnet** (cần RPC + private key ví test có ETH test).
 
-> Nếu bạn chỉ muốn chạy nhanh để demo trên máy cá nhân, nên dùng **local Hardhat node** trước cho dễ.
+> Hiện bạn đang dùng Sepolia testnet
 
 ---
 
