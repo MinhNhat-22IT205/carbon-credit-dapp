@@ -96,7 +96,7 @@ npm install
    - Lệnh này sẽ deploy tất cả contract lên local node.
    - Sau khi deploy xong, hãy ghi lại **địa chỉ contract** in ra trong log hoặc trong thư mục `deployments/` (nếu script có lưu).
 
-#### 3.2.2. Nếu deploy lên **Sepolia testnet** (hiện đang dùng)
+#### 3.2.2. Nếu deploy lên **Sepolia testnet**
 
 1. Lấy RPC URL (ví dụ từ Infura/Alchemy hay https://developer.metamask.io/):
    - Ví dụ: `https://sepolia.infura.io/v3/<YOUR_INFURA_KEY>`
