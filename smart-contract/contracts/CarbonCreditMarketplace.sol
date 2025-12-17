@@ -111,7 +111,7 @@ contract CarbonCreditMarketplace {
             greenNFTCollection.ownerOf(batchTokenId) == msg.sender,
             "Not owner"
         );
-        require(sale.availableWei == sale.totalWei, "Already partially sold");
+        // require(sale.availableWei == sale.totalWei, "Already partially sold");
 
         sale.active = false;
         _removeFromActiveList(batchTokenId);
@@ -123,7 +123,7 @@ contract CarbonCreditMarketplace {
 
         registry.setClaimStatus(
             sale.claimId,
-            CarbonCreditRegistry.Status.Audited
+            CarbonCreditRegistry.Status.Cancelled
         );
 
         emit BatchSaleCancelled(batchTokenId);

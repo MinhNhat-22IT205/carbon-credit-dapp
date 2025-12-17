@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   useAccount,
   useReadContract,
@@ -6,101 +6,107 @@ import {
   useWaitForTransactionReceipt,
   usePublicClient,
 } from "wagmi";
+import { formatUnits, parseUnits } from "viem";
 
 import CCTABI from "../contracts/abi/CarbonCreditToken.json";
 import RetirementABI from "../contracts/abi/RetirementCertificate.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
-import { formatUnits } from "viem";
 
-// Pinata JWT - lấy từ biến môi trường
-const PINATA_JWT = import.meta.env.VITE_PINATA_JWT as string | undefined;
+/* ================= TYPES ================= */
 
-// SVG Certificate Template
+interface Attribute {
+  trait_type: string;
+  value: string | number;
+}
+
+interface CertificateMetadata {
+  name: string;
+  description: string;
+  image: string;
+  attributes: Attribute[];
+}
+
+interface RetireHistoryItem {
+  certificateId: bigint;
+  metadata: CertificateMetadata;
+  metadataUrl: string;
+  svgUrl: string;
+}
+
+/* ================= PINATA ================= */
+
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT as string;
+
+/* ================= SVG ================= */
+
 const generateCertificateSVG = (
   tons: string,
   purpose: string,
   date: string,
   address: string
-) => {
-  return `
-<svg width="1000" height="700" xmlns="http://www.w3.org/2000/svg" style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); font-family: 'Georgia', serif;">
-  <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#86efac" />
-      <stop offset="100%" style="stop-color:#22c55e" />
-    </linearGradient>
-  </defs>
+) => `
+<svg width="1000" height="700" xmlns="http://www.w3.org/2000/svg"
+  style="background:#f0fdf4;font-family:Georgia,serif">
 
-  <rect width="1000" height="700" fill="white" stroke="url(#grad1)" stroke-width="15" rx="30"/>
-  
-  <text x="500" y="120" font-size="56" text-anchor="middle" fill="#166534" font-weight="bold">
+  <rect width="1000" height="700" rx="28"
+    fill="white" stroke="#22c55e" stroke-width="10"/>
+
+  <text x="500" y="100" font-size="48" text-anchor="middle"
+    fill="#14532d" font-weight="bold">
     CARBON RETIREMENT CERTIFICATE
   </text>
 
-  <text x="500" y="220" font-size="42" text-anchor="middle" fill="#15803d">
+  <text x="500" y="190" font-size="34" text-anchor="middle" fill="#166534">
     ${tons} tons CO₂e Permanently Retired
   </text>
 
-  <text x="500" y="290" font-size="32" text-anchor="middle" fill="#16a34a">
+  <text x="500" y="260" font-size="26" text-anchor="middle">
     Purpose: ${purpose}
   </text>
 
-  <text x="500" y="350" font-size="28" text-anchor="middle" fill="#15803d">
+  <text x="500" y="320" font-size="22" text-anchor="middle">
     Date: ${date}
   </text>
 
-  <text x="500" y="420" font-size="26" text-anchor="middle" fill="#1e40af">
+  <text x="500" y="390" font-size="20" text-anchor="middle">
     Retired by:
   </text>
-  <text x="500" y="470" font-size="28" text-anchor="middle" fill="#2563eb" font-weight="bold">
-    ${address.slice(0, 10)}...${address.slice(-8)}
+
+  <text x="500" y="430" font-size="18" text-anchor="middle"
+    fill="#1e40af">
+    ${address}
   </text>
 
-  <text x="500" y="600" font-size="20" text-anchor="middle" fill="#166534">
-    Verified on-chain • Powered by Green Carbon Protocol
+  <text x="500" y="610" font-size="16" text-anchor="middle" fill="#166534">
+    Verified on-chain • Green Carbon Protocol
   </text>
+</svg>
+`;
 
-  <!-- Decorative elements -->
-  <circle cx="150" cy="550" r="80" fill="#86efac" opacity="0.6"/>
-  <circle cx="850" cy="150" r="100" fill="#86efac" opacity="0.5"/>
-  <text x="150" y="570" font-size="80" text-anchor="middle" fill="#166534">🌿</text>
-  <text x="850" y="180" font-size="100" text-anchor="middle" fill="#16a34a">🌍</text>
-</svg>`;
-};
+/* ================= PINATA UPLOAD ================= */
 
-async function uploadCertificateToPinata(
-  svgContent: string,
-  metadata: any,
+async function uploadToPinata(
+  svg: string,
+  metadata: CertificateMetadata,
   tons: string
 ): Promise<string> {
-  if (!PINATA_JWT || PINATA_JWT === "your_real_pinata_jwt_here") {
-    throw new Error("Pinata JWT not configured. Please set it in code or .env");
-  }
+  if (!PINATA_JWT) throw new Error("Missing Pinata JWT");
 
-  const timestamp = Date.now();
-  const folderName = `retirement-${tons.replace(".", "-")}t-${timestamp}`;
-
-  const svgBlob = new Blob([svgContent], { type: "image/svg+xml" });
-  const svgFile = new File([svgBlob], "certificate.svg");
-
-  const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], {
-    type: "application/json",
-  });
-  const metadataFile = new File([metadataBlob], "metadata.json");
+  const folder = `retire-${tons}-${Date.now()}`;
 
   const formData = new FormData();
-  formData.append("file", svgFile, `${folderName}/certificate.svg`);
-  formData.append("file", metadataFile, `${folderName}/metadata.json`);
-
-  const pinataMetadata = JSON.stringify({
-    name: `Retirement Certificate - ${tons} tons`,
-    keyvalues: {
-      tons,
-      purpose: metadata.attributes.find((a: any) => a.trait_type === "Purpose")
-        ?.value,
-    },
-  });
-  formData.append("pinataMetadata", pinataMetadata);
+  formData.append(
+    "file",
+    new File([svg], "certificate.svg", { type: "image/svg+xml" }),
+    `${folder}/certificate.svg`
+  );
+  formData.append(
+    "file",
+    new File([JSON.stringify(metadata, null, 2)], "metadata.json", {
+      type: "application/json",
+    }),
+    `${folder}/metadata.json`
+  );
 
   const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
     method: "POST",
@@ -108,14 +114,13 @@ async function uploadCertificateToPinata(
     body: formData,
   });
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Pinata upload failed: ${errorText}`);
-  }
+  if (!res.ok) throw new Error("Pinata upload failed");
 
   const data = await res.json();
-  return data.IpfsHash; // folder CID
+  return data.IpfsHash;
 }
+
+/* ================= COMPONENT ================= */
 
 export default function RetireSection() {
   const { address, isConnected } = useAccount();
@@ -123,332 +128,220 @@ export default function RetireSection() {
 
   const [tons, setTons] = useState("");
   const [purpose, setPurpose] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  const {
-    writeContract,
-    data: hash,
-    isPending: txPending,
-    error: txError,
-  } = useWriteContract();
-  const { isLoading: txConfirming, isSuccess: txSuccess } =
-    useWaitForTransactionReceipt({ hash });
+  /* ===== BALANCE ===== */
 
-  // CCT Balance
   const { data: balanceRaw } = useReadContract({
     address: CONTRACT_ADDRESSES.CCT,
     abi: CCTABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
-    enabled: !!address,
   });
-  const balanceWei = balanceRaw ?? 0n; // BigInt (wei)
-  const balance = formatUnits(balanceWei, 18); // string, ví dụ "10000000"
 
-  // ================== LỊCH SỬ RETIRE THẬT (getLogs) ==================
-  const [retireHistory, setRetireHistory] = useState<
-    Array<{
-      certificateId: bigint;
-      tons: number;
-      purpose: string;
-      date: string;
-      txHash: string;
-    }>
-  >([]);
+  const balanceWei = (balanceRaw as bigint) ?? 0n;
+  const balance = formatUnits(balanceWei, 18);
 
-  const [historyLoading, setHistoryLoading] = useState(true);
+  /* ===== TX ===== */
 
-  useEffect(() => {
-    if (!address || !publicClient) {
-      setHistoryLoading(false);
-      return;
-    }
+  const {
+    writeContract,
+    data: txHash,
+    error: txError,
+    isPending,
+  } = useWriteContract();
 
-    const fetchHistory = async () => {
-      setHistoryLoading(true);
-      try {
-        const latestBlock = await publicClient.getBlockNumber();
+  const { isLoading: confirming, isSuccess } = useWaitForTransactionReceipt({
+    hash: txHash,
+  });
 
-        const STEP = 1000n;
-        let fromBlock = 0n;
-        const allLogs: any[] = [];
+  /* ================= RETIRE ================= */
 
-        while (fromBlock <= latestBlock) {
-          const toBlock =
-            fromBlock + STEP > latestBlock ? latestBlock : fromBlock + STEP;
-
-          const logs = await publicClient.getLogs({
-            address: CONTRACT_ADDRESSES.CCT,
-            event: {
-              name: "TokensRetired",
-              type: "event",
-              inputs: [
-                { name: "retire", type: "address", indexed: true },
-                { name: "tons", type: "uint256", indexed: false },
-                { name: "certificateId", type: "uint256", indexed: false },
-                { name: "purpose", type: "string", indexed: false },
-                { name: "timestamp", type: "uint256", indexed: false },
-              ],
-            },
-            args: { retire: address }, // ⚠️ đúng tên param trong event
-            fromBlock,
-            toBlock,
-          });
-
-          allLogs.push(...logs);
-          fromBlock = toBlock + 1n;
-        }
-
-        const history = allLogs
-          .map((log) => {
-            const args = log.args!;
-            return {
-              certificateId: args.certificateId,
-              tons: Number(args.tons) / 1e18,
-              purpose: args.purpose,
-              date: new Date(Number(args.timestamp) * 1000).toLocaleDateString(
-                "vi-VN"
-              ),
-              txHash: log.transactionHash,
-            };
-          })
-          .sort((a, b) => b.txHash.localeCompare(a.txHash));
-
-        setRetireHistory(history);
-      } catch (err) {
-        console.error("Error fetching retire history:", err);
-        setRetireHistory([]);
-      } finally {
-        setHistoryLoading(false);
-      }
-    };
-
-    fetchHistory();
-  }, [address, publicClient]);
-
-  // ================== HANDLE RETIRE ==================
   const handleRetire = async () => {
-    const tonsBigInt = BigInt(tons); // tons là string số nguyên
+    if (!address) return;
 
-    if (tonsBigInt <= 0n) {
-      alert("Số tấn không hợp lệ");
-      return;
-    }
-
-    if (tonsBigInt * 10n ** 18n > balanceWei) {
-      alert("Số tấn vượt quá số dư");
-      return;
-    }
-
-    if (!purpose.trim()) {
-      alert("Vui lòng nhập mục đích retire");
-      return;
-    }
+    const tonsWei = parseUnits(tons || "0", 18);
+    if (tonsWei <= 0n) return alert("Invalid tons");
+    if (tonsWei > balanceWei) return alert("Insufficient balance");
+    if (!purpose.trim()) return alert("Purpose required");
 
     setUploading(true);
-    setStatus("Đang tạo certificate...");
+    setStatus("Generating certificate...");
 
     try {
       const date = new Date().toLocaleDateString("vi-VN");
-      const svg = generateCertificateSVG(
-        tons,
-        purpose,
-        date,
-        address || "0x000...000"
-      );
+      const svg = generateCertificateSVG(tons, purpose, date, address);
 
-      const metadata = {
-        name: `Carbon Retirement Certificate - ${tons} tons`,
-        description: `Chứng nhận ${tons} tấn CO₂e đã được retire vĩnh viễn vào ngày ${date}. Mục đích: ${purpose}.`,
+      const metadata: CertificateMetadata = {
+        name: `Carbon Retirement Certificate`,
+        description: `${tons} tons CO₂e retired`,
         image: "ipfs://certificate.svg",
         attributes: [
-          { trait_type: "Tons Retired", value: Number(tons) },
+          { trait_type: "Tons Retired", value: tons },
           { trait_type: "Purpose", value: purpose },
           { trait_type: "Date", value: date },
           { trait_type: "Retiree", value: address },
         ],
       };
 
-      setStatus("Đang upload lên IPFS...");
-      const folderCID = await uploadCertificateToPinata(svg, metadata, tons);
+      setStatus("Uploading to IPFS...");
+      const cid = await uploadToPinata(svg, metadata, tons);
 
-      const certificateURI = `ipfs://${folderCID}/metadata.json`;
-
-      setStatus("Đang gửi giao dịch...");
       writeContract({
         address: CONTRACT_ADDRESSES.CCT,
         abi: CCTABI,
         functionName: "retire",
-        args: [tonsBigInt, purpose, certificateURI],
-        gas: 800000n, // Giới hạn 800k gas – đủ cho burn + mint NFT
+        args: [tonsWei, purpose, `ipfs://${cid}/metadata.json`],
       });
-    } catch (err: any) {
-      console.error("Retire error:", err);
-      setStatus(`Lỗi: ${err.message}`);
-      alert("Retire thất bại: " + err.message);
+    } catch (e: any) {
+      setStatus(`Error: ${e.message}`);
       setUploading(false);
     }
   };
 
   useEffect(() => {
-    if (txSuccess) {
-      setStatus("✅ Retire thành công! Certificate đã được mint.");
+    if (isSuccess) {
+      setStatus("✅ Retire successful");
       setTons("");
       setPurpose("");
-      setTimeout(() => setStatus(""), 8000);
       setUploading(false);
     }
     if (txError) {
-      setStatus(
-        `Giao dịch lỗi: ${(txError as any).shortMessage || txError.message}`
-      );
+      setStatus(`❌ ${txError.message}`);
       setUploading(false);
     }
-  }, [txSuccess, txError]);
+  }, [isSuccess, txError]);
+
+  /* ================= HISTORY ================= */
+
+  const [history, setHistory] = useState<RetireHistoryItem[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    if (!address || !publicClient) return;
+
+    const loadHistory = async () => {
+      setLoadingHistory(true);
+      try {
+        const ids = (await publicClient.readContract({
+          address: CONTRACT_ADDRESSES.RETIREMENT_CERTIFICATE,
+          abi: RetirementABI,
+          functionName: "getRetirements",
+          args: [address],
+        })) as bigint[];
+
+        const items = await Promise.all(
+          ids.map(async (id) => {
+            const uri = (await publicClient.readContract({
+              address: CONTRACT_ADDRESSES.RETIREMENT_CERTIFICATE,
+              abi: RetirementABI,
+              functionName: "tokenURI",
+              args: [id],
+            })) as string;
+
+            const base = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
+            const svgUrl = base.replace("metadata.json", "certificate.svg");
+
+            const meta = await (await fetch(base)).json();
+
+            return {
+              certificateId: id,
+              metadata: meta,
+              metadataUrl: base,
+              svgUrl,
+            };
+          })
+        );
+
+        setHistory(items.reverse());
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+
+    loadHistory();
+  }, [address, publicClient]);
+
+  /* ================= UI ================= */
 
   return (
-    <div className="max-w-7xl mx-auto space-y-16 py-16 px-6">
-      <h2 className="text-6xl font-bold text-center text-teal-800">
-        🌿 Retire Carbon Credits & Nhận Chứng Chỉ
+    <div className="max-w-6xl mx-auto py-12 space-y-14">
+      <h2 className="text-4xl font-bold text-center text-emerald-800">
+        🌿 Retire Carbon Credits
       </h2>
 
-      {!isConnected && (
-        <div className="text-center bg-red-100 text-red-700 p-10 rounded-3xl text-2xl font-bold">
-          Vui lòng kết nối ví để retire CCT
-        </div>
-      )}
+      {/* ===== FORM ===== */}
+      <div className="bg-white p-8 rounded-xl shadow space-y-4">
+        <p className="text-sm text-gray-600">
+          Balance: <b>{balance}</b> CCT
+        </p>
 
-      <div className="grid lg:grid-cols-2 gap-12">
-        {/* ================== FORM RETIRE ================== */}
-        <div className="bg-gradient-to-br from-teal-50 to-green-50 p-12 rounded-3xl shadow-2xl">
-          <h3 className="text-4xl font-bold text-teal-900 mb-10 text-center">
-            Retire CCT Ngay
-          </h3>
+        <input
+          value={tons}
+          onChange={(e) => setTons(e.target.value)}
+          placeholder="Tons to retire"
+          type="number"
+          className="w-full border px-4 py-2 rounded"
+        />
 
-          <div className="bg-white/80 p-8 rounded-2xl mb-8 shadow-inner">
-            <p className="text-2xl font-semibold text-gray-800">Số dư CCT:</p>
-            <p className="text-5xl font-bold text-teal-600 mt-4">
-              {Number(balance).toLocaleString("en-US", {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 6,
-              })}{" "}
-              CCT
-            </p>
-          </div>
+        <input
+          value={purpose}
+          onChange={(e) => setPurpose(e.target.value)}
+          placeholder="Purpose"
+          className="w-full border px-4 py-2 rounded"
+        />
 
-          <input
-            type="number"
-            placeholder="Số tấn muốn retire"
-            value={tons}
-            onChange={(e) => setTons(e.target.value)}
-            className="w-full px-8 py-5 border-4 border-teal-300 rounded-2xl text-2xl mb-8 focus:border-teal-500 focus:outline-none"
-            disabled={uploading || txPending || txConfirming}
-            min="0.000001"
-            step="0.000001"
-          />
+        <button
+          disabled={!isConnected || uploading || isPending || confirming}
+          onClick={handleRetire}
+          className="w-full bg-emerald-600 text-white py-2 rounded disabled:opacity-50"
+        >
+          {uploading || isPending ? "Processing..." : "Retire & Mint NFT"}
+        </button>
 
-          <input
-            type="text"
-            placeholder="Mục đích (ví dụ: Carbon Neutral 2025)"
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-8 py-5 border-4 border-teal-300 rounded-2xl text-xl mb-10"
-            disabled={uploading || txPending || txConfirming}
-          />
+        {status && <p className="text-sm text-center">{status}</p>}
+      </div>
 
-          <button
-            onClick={handleRetire}
-            disabled={
-              uploading ||
-              txPending ||
-              txConfirming ||
-              !tons ||
-              (tons && BigInt(tons) * 10n ** 18n > balanceWei) ||
-              !purpose.trim()
-            }
-            className="w-full py-8 rounded-2xl font-bold text-3xl text-white bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 disabled:opacity-60 shadow-2xl transition-all"
-          >
-            {uploading
-              ? "Đang tạo & upload certificate..."
-              : txPending || txConfirming
-              ? "Đang xử lý giao dịch..."
-              : "Retire & Nhận Certificate"}
-          </button>
+      {/* ===== HISTORY ===== */}
+      <div>
+        <h3 className="text-2xl font-semibold mb-6">Your Certificates</h3>
 
-          {status && (
-            <div
-              className={`mt-8 p-6 rounded-2xl text-center text-xl font-semibold ${
-                status.includes("Lỗi") || status.includes("Error")
-                  ? "bg-red-100 text-red-700"
-                  : status.includes("thành công")
-                  ? "bg-green-100 text-green-700"
-                  : "bg-blue-100 text-blue-700"
-              }`}
-            >
-              {status}
-            </div>
-          )}
-        </div>
+        {loadingHistory ? (
+          <p>Loading...</p>
+        ) : history.length === 0 ? (
+          <p>No certificates yet</p>
+        ) : (
+          <div className="space-y-6">
+            {history.map((item) => (
+              <div
+                key={item.certificateId.toString()}
+                className="border rounded-lg p-5 flex gap-6"
+              >
+                <img src={item.svgUrl} className="w-52 border rounded" />
 
-        {/* ================== LỊCH SỬ RETIRE ================== */}
-        <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-12 rounded-3xl shadow-2xl">
-          <h3 className="text-4xl font-bold text-teal-900 mb-10 text-center">
-            Lịch sử Retire của bạn ({retireHistory.length})
-          </h3>
-
-          {historyLoading ? (
-            <div className="text-center py-20">
-              <div className="inline-block animate-spin rounded-full h-16 w-16 border-8 border-teal-600 border-t-transparent"></div>
-              <p className="mt-6 text-xl text-gray-600">Đang tải lịch sử...</p>
-            </div>
-          ) : retireHistory.length === 0 ? (
-            <div className="text-center py-20">
-              <p className="text-3xl text-gray-600">
-                🌱 Chưa có lượt retire nào
-              </p>
-              <p className="text-xl text-gray-500 mt-4">
-                Hãy là người đầu tiên retire CCT!
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              {retireHistory.map((item) => (
-                <div
-                  key={item.txHash}
-                  className="bg-white p-8 rounded-2xl shadow-xl hover:shadow-2xl transition"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-4xl font-bold text-green-700">
-                        {item.tons.toFixed(6)} tấn
-                      </p>
-                      <p className="text-2xl text-gray-800 mt-3">
-                        {item.purpose}
-                      </p>
-                      <p className="text-lg text-gray-600 mt-2">
-                        Ngày: {item.date}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-purple-700 text-xl">
-                        Certificate #{item.certificateId.toString()}
-                      </p>
-                      <a
-                        href={`https://etherscan.io/tx/${item.txHash}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-block mt-4 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700"
-                      >
-                        Xem giao dịch →
-                      </a>
-                    </div>
+                <div className="text-sm space-y-1">
+                  <p className="font-semibold">
+                    Certificate #{item.certificateId.toString()}
+                  </p>
+                  {item.metadata.attributes.map((a) => (
+                    <p key={a.trait_type}>
+                      <b>{a.trait_type}:</b> {a.value}
+                    </p>
+                  ))}
+                  <div className="pt-2 flex gap-4 text-emerald-700">
+                    <a href={item.metadataUrl} target="_blank">
+                      Metadata
+                    </a>
+                    <a href={item.svgUrl} target="_blank">
+                      SVG
+                    </a>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

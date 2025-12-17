@@ -223,7 +223,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "retiree",
+        "name": "retire",
         "type": "address"
       },
       {
@@ -455,7 +455,7 @@
       },
       {
         "internalType": "uint256",
-        "name": "tons",
+        "name": "tons_in_wei",
         "type": "uint256"
       }
     ],
@@ -499,7 +499,7 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "tons",
+        "name": "tonsWei",
         "type": "uint256"
       },
       {

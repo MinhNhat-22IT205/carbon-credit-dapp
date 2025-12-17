@@ -9,6 +9,10 @@ contract RetirementCertificate is ERC721, ERC721URIStorage, AccessControl {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     uint256 private _nextTokenId;
 
+    // ================= HISTORY =================
+    // Lưu tokenId đã mint theo user
+    mapping(address => uint256[]) private _retirements;
+
     constructor() ERC721("Carbon Retirement Certificate", "RETIRE") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MINTER_ROLE, msg.sender);
@@ -21,7 +25,20 @@ contract RetirementCertificate is ERC721, ERC721URIStorage, AccessControl {
         tokenId = ++_nextTokenId;
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, tokenURI);
+
+        // Lưu lịch sử retire
+        _retirements[to].push(tokenId);
+
         return tokenId;
+    }
+
+    // ================= VIEW =================
+
+    /// @notice Lấy danh sách certificateId đã retire của user
+    function getRetirements(
+        address user
+    ) external view returns (uint256[] memory) {
+        return _retirements[user];
     }
 
     // OVERRIDE

@@ -44,19 +44,18 @@ contract CarbonCreditToken is ERC20, AccessControl {
 
     /**
      * @dev Retire (burn) CCT và mint Retirement Certificate NFT
-     * @param tons Số tấn muốn retire
+     * @param tonsWei Số tấn (wei) muốn retire
      * @param purpose Mục đích retire (ví dụ: "2025 Carbon Neutral", "Product Offset")
      * @param certificateURI IPFS link đến metadata certificate (JSON + image)
      */
     function retire(
-        uint256 tons,
+        uint256 tonsWei,
         string memory purpose,
         string memory certificateURI
     ) external returns (uint256 certificateId) {
-        require(tons > 0, "Zero tons");
-        uint256 amount = tons * 1e18;
+        require(tonsWei > 0, "Zero tons");
 
-        _burn(msg.sender, amount);
+        _burn(msg.sender, tonsWei);
 
         certificateId = retirementCertificate.mintCertificate(
             msg.sender,
@@ -65,7 +64,7 @@ contract CarbonCreditToken is ERC20, AccessControl {
 
         emit TokensRetired(
             msg.sender,
-            tons,
+            tonsWei,
             certificateId,
             purpose,
             block.timestamp

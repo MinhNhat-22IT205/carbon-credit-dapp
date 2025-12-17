@@ -1,0 +1,13 @@
+{
+  "network": "sepolia",
+  "chainId": "11155111",
+  "deployer": "0x212f0437f256Fd87EFcE5A10d061832F74F9A9Ca",
+  "timestamp": "2025-12-17T05:30:27.515Z",
+  "contracts": {
+    "RetirementCertificate": "0x9f7978EC44a5c450b60975abaf0b9C71e4cB533a",
+    "CarbonCreditToken": "0x365cFAa34a1119e2201218fCcb26Cf54F0A96a8B",
+    "GreenNFTCollection": "0xe80B7E2b41B8731d0fCCA29139229cf0A7DFdeA2",
+    "CarbonCreditRegistry": "0x2C0C7E26018275fD03823122D96cEDE5FB9Cfe2D",
+    "CarbonCreditMarketplace": "0xec3c542c8126d89268a834308A97561417168578"
+  }
+}

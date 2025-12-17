@@ -19,7 +19,7 @@ const PRICE_PER_TON = 0.00005; // ETH/tấn
 interface NFTMetadata {
   name?: string;
   description?: string;
-  image?: string;
+  certificate?: string;
   attributes?: Array<{ trait_type: string; value: string | number }>;
 }
 
@@ -151,9 +151,9 @@ function BundleDetailModal({
                   {metadata?.description}
                 </p>
                 <Link
-                  to={`https://ipfs.io/ipfs/${tokenURI.slice(
-                    7
-                  )}/${metadata.certificate?.slice(7)}`}
+                  to={`https://ipfs.io/ipfs/${tokenURI.slice(7)}/${
+                    metadata ? metadata.certificate?.slice(7) : ""
+                  }`}
                   className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white! hover:bg-blue-700"
                 >
                   View certificate
@@ -317,8 +317,10 @@ export default function MarketplaceSection() {
       let uri = typeof uriResult === "string" ? uriResult : "";
       if (uri.startsWith("ipfs://"))
         uri = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
+      console.log(uri);
+      // return;
       try {
-        const res = await fetch(uri);
+        const res = await fetch(uri + "/metadata.json");
         if (res.ok) {
           const meta = await res.json();
           setMetadataCache((prev) => ({ ...prev, [idStr]: meta }));
@@ -391,6 +393,15 @@ export default function MarketplaceSection() {
     claim && typeof claim === "object" && "reductionTons" in claim
       ? (claim as { reductionTons: bigint }).reductionTons
       : 0n;
+
+  // Status enum in Registry:
+  // 0 = Pending, 1 = Audited, 2 = Rejected, 3 = OnSale, 4 = Sold, 5 = Cancelled
+  const claimStatus =
+    claim && typeof claim === "object" && "status" in claim
+      ? (claim as { status: number | bigint }).status
+      : undefined;
+
+  const isAuditedClaim = claimStatus === 1 || claimStatus === 1n;
 
   const { data: saleInfoRaw } = useReadContract({
     address: sellBigId ? CONTRACT_ADDRESSES.MARKETPLACE : undefined,
@@ -595,8 +606,16 @@ export default function MarketplaceSection() {
               </div>
             )}
 
+            {sellBigId && isOwner && actualTons > 0n && !isAuditedClaim && (
+              <p className="text-red-600 font-bold text-xl mb-4">
+                This bundle&apos;s claim is not audited or cancelled and cannot
+                be listed.
+              </p>
+            )}
+
             {isOwner &&
               actualTons > 0n &&
+              isAuditedClaim &&
               !hasEnoughAllowance &&
               !saleInfo?.active && (
                 <button
@@ -610,15 +629,18 @@ export default function MarketplaceSection() {
                 </button>
               )}
 
-            {isOwner && hasEnoughAllowance && !saleInfo?.active && (
-              <button
-                onClick={openSale}
-                disabled={txLoading}
-                className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
-              >
-                {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
-              </button>
-            )}
+            {isOwner &&
+              hasEnoughAllowance &&
+              isAuditedClaim &&
+              !saleInfo?.active && (
+                <button
+                  onClick={openSale}
+                  disabled={txLoading}
+                  className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+                >
+                  {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
+                </button>
+              )}
 
             {isOwner && saleInfo?.active && (
               <button
