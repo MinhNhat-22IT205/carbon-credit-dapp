@@ -5,6 +5,7 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
+import { formatUnits, type Abi } from "viem";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
 import BatchNFTCard from "./BatchNFTCard";
@@ -77,12 +78,11 @@ async function uploadToPinata(files: File[], claimId: string): Promise<string> {
 // COMPONENT
 // ============================================================================
 export default function AuditorDashboard() {
-  const [claimId, setClaimId] = useState("");
+  const [claimId] = useState("");
   const {
     writeContract,
     isPending: txPending,
     data: hash,
-    error: txError,
   } = useWriteContract();
   const { isLoading: txConfirming } = useWaitForTransactionReceipt({ hash });
 
@@ -98,10 +98,9 @@ export default function AuditorDashboard() {
   /* ---------- Single claim by ID ---------- */
   const { data: claim } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
-    abi: RegistryABI,
+    abi: RegistryABI as Abi,
     functionName: "getClaim",
     args: claimId ? [BigInt(claimId)] : undefined,
-    enabled: !!claimId,
   }) as { data?: ClaimStruct };
 
   /* ---------- Pending claim IDs ---------- */
@@ -115,7 +114,7 @@ export default function AuditorDashboard() {
   const claimContracts =
     pendingClaimIds?.map((id) => ({
       address: CONTRACT_ADDRESSES.REGISTRY,
-      abi: RegistryABI,
+      abi: RegistryABI as Abi,
       functionName: "getClaim",
       args: [id],
     })) || [];
@@ -126,12 +125,16 @@ export default function AuditorDashboard() {
 
   /* ---------- Batch read projects ---------- */
   const projectContracts =
-    pendingClaims?.map((item: any) => ({
-      address: CONTRACT_ADDRESSES.REGISTRY,
-      abi: RegistryABI,
-      functionName: "getProject",
-      args: [item?.result?.projectId],
-    })) || [];
+    pendingClaims?.map((item) => {
+      const claim =
+        item?.status === "success" ? (item.result as ClaimStruct) : undefined;
+      return {
+        address: CONTRACT_ADDRESSES.REGISTRY,
+        abi: RegistryABI as Abi,
+        functionName: "getProject",
+        args: [claim?.projectId],
+      };
+    }) || [];
 
   const { data: projects } = useReadContracts({ contracts: projectContracts });
 
@@ -159,8 +162,16 @@ export default function AuditorDashboard() {
     );
     if (claimIndex === undefined || claimIndex === -1) return;
 
-    const claim = pendingClaims?.[claimIndex]?.result as ClaimStruct;
-    const project = projects?.[claimIndex]?.result as ProjectStruct;
+    const claimItem = pendingClaims?.[claimIndex];
+    const projectItem = projects?.[claimIndex];
+    const claim =
+      claimItem?.status === "success"
+        ? (claimItem.result as ClaimStruct)
+        : undefined;
+    const project =
+      projectItem?.status === "success"
+        ? (projectItem.result as ProjectStruct)
+        : undefined;
     if (!claim || !project) {
       alert("Loading claim/project data...");
       return;
@@ -183,25 +194,22 @@ export default function AuditorDashboard() {
         Number(claim.periodStart) * 1000
       ).getFullYear();
 
-      const coverFile = files.find((f) =>
-        /\.(jpg|jpeg|png|gif|webp)$/i.test(f.name)
-      );
       const certificateFile = files.find((f) =>
         /\.(pdf|docx|doc|txt|jpg|jpeg|png|gif|webp)$/i.test(f.name)
       );
-      const imagePath = coverFile ? `${coverFile.name}` : "";
+
+      const reductionTonsFormatted = formatUnits(claim.reductionTons, 18);
 
       const metadataContent = {
         name: `Green Carbon Batch #${claimIdStr} - ${project.name} ${vintageYear}`,
-        description: `Chứng nhận giảm phát thải ${claim.reductionTons} tấn CO₂e đã được audit độc lập.\nDự án: ${project.name}\nKỳ: ${periodStartDate} - ${periodEndDate}.`,
-        // image: imagePath ? `ipfs://${imagePath}` : "",
+        description: `Chứng nhận giảm phát thải ${reductionTonsFormatted} tấn CO₂e đã được audit độc lập.\nDự án: ${project.name}\nKỳ: ${periodStartDate} - ${periodEndDate}.`,
         certificate: certificateFile ? `ipfs://${certificateFile.name}` : "",
         attributes: [
           { trait_type: "Project ID", value: claim.projectId.toString() },
           { trait_type: "Project Name", value: project.name },
           {
             trait_type: "Reduction Tons",
-            value: claim.reductionTons.toString(),
+            value: reductionTonsFormatted,
           },
           { trait_type: "Vintage Year", value: vintageYear.toString() },
           {
@@ -231,17 +239,19 @@ export default function AuditorDashboard() {
 
       writeContract({
         address: CONTRACT_ADDRESSES.REGISTRY,
-        abi: RegistryABI,
+        abi: RegistryABI as Abi,
         functionName: "auditAndIssue",
         args: [BigInt(claimIdStr), `${folderCID}`],
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Audit error:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       setUploadStatus((prev) => ({
         ...prev,
-        [claimIdStr]: `Error: ${error.message}`,
+        [claimIdStr]: `Error: ${errorMessage}`,
       }));
-      alert(`Failed: ${error.message}`);
+      alert(`Failed: ${errorMessage}`);
     } finally {
       setUploadingClaims((prev) => ({ ...prev, [claimIdStr]: false }));
     }
@@ -259,7 +269,7 @@ export default function AuditorDashboard() {
 
     writeContract({
       address: CONTRACT_ADDRESSES.REGISTRY,
-      abi: RegistryABI,
+      abi: RegistryABI as Abi,
       functionName: "rejectClaim", // Hàm rejectClaim phải tồn tại trong contract
       args: [BigInt(claimIdStr)],
     });
@@ -308,11 +318,15 @@ export default function AuditorDashboard() {
 
       {pendingClaims && pendingClaims.length > 0 ? (
         <div className="space-y-8">
-          {pendingClaims.map((item: any, index: number) => {
-            const claim = item?.result as ClaimStruct | undefined;
-            const project = projects?.[index]?.result as
-              | ProjectStruct
-              | undefined;
+          {pendingClaims.map((item, index: number) => {
+            const claim =
+              item?.status === "success"
+                ? (item.result as ClaimStruct)
+                : undefined;
+            const project =
+              projects?.[index]?.status === "success"
+                ? (projects[index].result as ProjectStruct)
+                : undefined;
             const currentClaimId = pendingClaimIds?.[index]?.toString() || "";
             if (!claim) return null;
 
@@ -351,7 +365,7 @@ export default function AuditorDashboard() {
                           Reduction:
                         </span>
                         <span className="text-green-700 font-bold text-xl">
-                          {claim.reductionTons.toString()} tons CO₂
+                          {formatUnits(claim.reductionTons, 18)} tons CO₂
                         </span>
                       </div>
                       <div className="flex items-start gap-3">
@@ -359,7 +373,10 @@ export default function AuditorDashboard() {
                           Baseline:
                         </span>
                         <span>
-                          {project?.baselineEmissions.toString()} tons/year
+                          {project?.baselineEmissions
+                            ? project.baselineEmissions.toString()
+                            : "Loading..."}{" "}
+                          tons/year
                         </span>
                       </div>
                       <div className="flex items-start gap-3">

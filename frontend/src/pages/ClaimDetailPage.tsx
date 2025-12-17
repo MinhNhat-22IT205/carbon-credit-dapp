@@ -4,6 +4,7 @@ import { useReadContract, useReadContracts } from "wagmi";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
+import { formatUnits } from "viem";
 
 type ClaimStruct = {
   projectId: bigint;
@@ -168,7 +169,7 @@ export default function ClaimDetailPage() {
                   Reduction (tons CO₂)
                 </p>
                 <p className="mt-1 font-semibold text-emerald-700">
-                  {claim.reductionTons.toString()}
+                  {formatUnits(claim.reductionTons, 18)}
                 </p>
               </div>
               <div>

@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
+import { parseUnits, formatUnits, type Abi } from "viem";
 
 /* ---------- Types ---------- */
 type ClaimStruct = {
@@ -140,7 +141,7 @@ export default function ClaimSection() {
   const claimIdContracts =
     projectIds?.map((pid) => ({
       address: CONTRACT_ADDRESSES.REGISTRY,
-      abi: RegistryABI,
+      abi: RegistryABI as Abi,
       functionName: "getClaimsByProject",
       args: [pid],
     })) || [];
@@ -151,13 +152,18 @@ export default function ClaimSection() {
 
   const allClaimIds: bigint[] =
     allClaimIdsArray
-      ?.map((item: any) => item?.result as bigint[])
+      ?.map((item) => {
+        if (item.status === "success" && item.result) {
+          return item.result as bigint[];
+        }
+        return [];
+      })
       .flat()
       .filter(Boolean) || [];
 
   const claimContracts = allClaimIds.map((id) => ({
     address: CONTRACT_ADDRESSES.REGISTRY,
-    abi: RegistryABI,
+    abi: RegistryABI as Abi,
     functionName: "getClaim",
     args: [id],
   }));
@@ -210,7 +216,7 @@ export default function ClaimSection() {
         functionName: "submitClaim",
         args: [
           BigInt(projectId),
-          BigInt(reductionTons),
+          parseUnits(reductionTons, 18),
           BigInt(new Date(periodStart).getTime() / 1000),
           BigInt(new Date(periodEnd).getTime() / 1000),
           evidenceCID,
@@ -224,10 +230,12 @@ export default function ClaimSection() {
       setPeriodStart("");
       setPeriodEnd("");
       setUploadStatus("Claim submitted successfully!");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setUploadStatus(`Error: ${error.message}`);
-      alert(`Failed: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      setUploadStatus(`Error: ${errorMessage}`);
+      alert(`Failed: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
@@ -245,12 +253,14 @@ export default function ClaimSection() {
         }
         return null;
       })
-      .filter(Boolean) || [];
+      .filter(
+        (ac): ac is { claimId: bigint; batchTokenId: bigint } => ac !== null
+      ) || [];
 
   const tokenURIContracts =
     auditedClaims.map((ac) => ({
       address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION, // Thêm address GreenNFT vào addresses.ts
-      abi: GreenNFTABI,
+      abi: GreenNFTABI as Abi,
       functionName: "tokenURI",
       args: [ac.batchTokenId],
     })) || [];
@@ -273,8 +283,12 @@ export default function ClaimSection() {
       const newMetadatas: Record<string, NFTMetadata | null> = {};
       for (let i = 0; i < tokenURIs.length; i++) {
         const uriResult = tokenURIs[i]?.result as string | undefined;
+        const auditedClaim = auditedClaims[i];
+        if (!auditedClaim) {
+          continue;
+        }
         if (!uriResult) {
-          newMetadatas[auditedClaims[i].claimId.toString()] = null;
+          newMetadatas[auditedClaim.claimId.toString()] = null;
           continue;
         }
 
@@ -293,13 +307,13 @@ export default function ClaimSection() {
           const res = await fetch(metadataUrl);
           if (res.ok) {
             const json = (await res.json()) as NFTMetadata;
-            newMetadatas[auditedClaims[i].claimId.toString()] = json;
+            newMetadatas[auditedClaim.claimId.toString()] = json;
           } else {
-            newMetadatas[auditedClaims[i].claimId.toString()] = null;
+            newMetadatas[auditedClaim.claimId.toString()] = null;
           }
         } catch (err) {
           console.error("Fetch metadata error:", err);
-          newMetadatas[auditedClaims[i].claimId.toString()] = null;
+          newMetadatas[auditedClaim.claimId.toString()] = null;
         }
       }
       setNftMetadatas(newMetadatas);
@@ -350,7 +364,9 @@ export default function ClaimSection() {
         if (!claim || !claimId) return null;
         return { claim, claimId };
       })
-      .filter(Boolean) || [];
+      .filter(
+        (ec): ec is { claim: ClaimStruct; claimId: bigint } => ec !== null
+      ) || [];
 
   const filteredClaims = enrichedClaims.filter(({ claim }) =>
     selectedStatus.includes(Number(claim.status))
@@ -551,7 +567,7 @@ export default function ClaimSection() {
                         <p className="mt-2">
                           <strong>Reduction:</strong>{" "}
                           <span className="text-green-700 font-bold">
-                            {claim.reductionTons.toString()} tons CO₂
+                            {formatUnits(claim.reductionTons, 18)} tons CO₂
                           </span>
                         </p>
                         <p>

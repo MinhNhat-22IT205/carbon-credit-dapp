@@ -6,20 +6,21 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
-import { formatUnits, parseUnits, parseEther } from "viem";
+import { formatUnits, parseUnits, type Abi } from "viem";
 import MarketplaceABI from "../contracts/abi/CarbonCreditMarketplace.json";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
 import CCTABI from "../contracts/abi/CarbonCreditToken.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
+import { Link } from "react-router-dom";
 
-const PRICE_PER_TON = 0.01; // ETH/tấn
+const PRICE_PER_TON = 0.00005; // ETH/tấn
 
 interface NFTMetadata {
   name?: string;
   description?: string;
   image?: string;
-  attributes?: Array<{ trait_type: string; value: any }>;
+  attributes?: Array<{ trait_type: string; value: string | number }>;
 }
 
 // Modal chi tiết bundle để mua
@@ -30,11 +31,13 @@ function BundleDetailModal({
   batchId: bigint;
   onClose: () => void;
 }) {
-  const { address, isConnected } = useAccount();
+  const { isConnected } = useAccount();
   const [tonsToBuy, setTonsToBuy] = useState("");
-  const { writeContract } = useWriteContract();
-
-  const { data: hash, isPending: writePending } = useWriteContract();
+  const {
+    writeContract,
+    data: hash,
+    isPending: writePending,
+  } = useWriteContract();
   const { isLoading: txLoading } = useWaitForTransactionReceipt({ hash });
 
   const { data: saleRaw } = useReadContract({
@@ -44,33 +47,35 @@ function BundleDetailModal({
     args: [batchId],
   });
 
-  const sale = saleRaw
-    ? {
-        seller: saleRaw[0] as string,
-        totalTons: saleRaw[1] as bigint,
-        availableTons: saleRaw[2] as bigint,
-        active: saleRaw[3] as boolean,
-      }
-    : null;
+  const sale =
+    saleRaw && Array.isArray(saleRaw)
+      ? {
+          seller: saleRaw[0] as string,
+          totalWei: saleRaw[1] as bigint,
+          availableWei: saleRaw[2] as bigint,
+          active: saleRaw[3] as boolean,
+        }
+      : null;
 
   const { data: tokenURI } = useReadContract({
     address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
     abi: GreenNFTABI,
     functionName: "tokenURI",
-    args: [batchId],
+    args: batchId ? [batchId + ""] : undefined,
   });
 
   const [metadata, setMetadata] = useState<NFTMetadata | null>(null);
 
   // Fetch metadata (an toàn, không dùng hook trong effect nữa - dùng effect thuần)
-  useState(() => {
-    if (!tokenURI) return;
+  useEffect(() => {
+    if (!tokenURI || typeof tokenURI !== "string") return;
+    console.log("tokenURI:", tokenURI);
     const fetchMeta = async () => {
       const uri = tokenURI.startsWith("ipfs://")
         ? tokenURI.replace("ipfs://", "https://ipfs.io/ipfs/")
         : tokenURI;
       try {
-        const res = await fetch(uri);
+        const res = await fetch(uri + "/metadata.json");
         if (res.ok) setMetadata(await res.json());
       } catch (e) {
         console.error("Metadata fetch error:", e);
@@ -81,22 +86,42 @@ function BundleDetailModal({
 
   if (!sale?.active) return null;
 
-  const availableTons = Number(formatUnits(sale.availableTons, 0));
-  const tonsInput = tonsToBuy ? parseFloat(tonsToBuy) || 0 : 0;
-  const totalPrice = tonsInput * PRICE_PER_TON;
+  // availableWei là bigint (wei), cần chia 1e18 để lấy số ton
+  const availableTons = Number(formatUnits(sale.availableWei, 18));
+
+  // giữ input dưới dạng string
+  const tonsInput = tonsToBuy?.trim() || "0";
+  const tonsNumber = Number(tonsInput) || 0;
+
+  // Tính totalPrice từ số ton nhập vào
+  const totalPrice = tonsNumber * PRICE_PER_TON;
 
   const handleBuy = () => {
-    if (tonsInput <= 0 || tonsInput > availableTons) return;
+    const tonsNumber = Number(tonsInput);
 
-    const tonsBigInt = BigInt(Math.floor(tonsInput));
-    const totalPrice = Number(tonsBigInt) * PRICE_PER_TON;
+    if (
+      !tonsInput ||
+      isNaN(tonsNumber) ||
+      tonsNumber <= 0 ||
+      tonsNumber > availableTons
+    ) {
+      return;
+    }
+
+    // tons -> wei (18 decimals)
+    const tonsWei = parseUnits(tonsInput, 18);
+
+    const pricePerTonWei = parseUnits(PRICE_PER_TON + "", 18);
+    const ONE_ETHER = 10n ** 18n;
+    // total price = tonsWei * pricePerTon / 1e18
+    const totalValue = (tonsWei * pricePerTonWei) / ONE_ETHER;
 
     writeContract({
       address: CONTRACT_ADDRESSES.MARKETPLACE,
       abi: MarketplaceABI,
       functionName: "buyCredits",
-      args: [batchId, tonsBigInt],
-      value: parseEther(totalPrice.toString()),
+      args: [batchId, tonsWei],
+      value: totalValue,
     });
   };
 
@@ -118,16 +143,6 @@ function BundleDetailModal({
 
           <div className="grid md:grid-cols-2 gap-8">
             <div>
-              {metadata?.image && (
-                <img
-                  src={metadata.image.replace(
-                    "ipfs://",
-                    "https://ipfs.io/ipfs/"
-                  )}
-                  alt="Certificate"
-                  className="w-full rounded-2xl shadow-lg"
-                />
-              )}
               <div className="mt-6">
                 <h3 className="text-2xl font-bold text-gray-800">
                   {metadata?.name || "Carbon Bundle"}
@@ -135,16 +150,42 @@ function BundleDetailModal({
                 <p className="text-gray-600 mt-3 leading-relaxed">
                   {metadata?.description}
                 </p>
+                <Link
+                  to={`https://ipfs.io/ipfs/${tokenURI.slice(
+                    7
+                  )}/${metadata.certificate?.slice(7)}`}
+                  className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white! hover:bg-blue-700"
+                >
+                  View certificate
+                </Link>
                 {metadata?.attributes && (
                   <div className="grid grid-cols-2 gap-4 mt-6">
-                    {metadata.attributes.map((attr, i) => (
-                      <div key={i} className="bg-gray-50 p-4 rounded-xl">
-                        <p className="text-sm text-gray-500">
-                          {attr.trait_type}
-                        </p>
-                        <p className="font-semibold">{attr.value}</p>
-                      </div>
-                    ))}
+                    {metadata.attributes.map((attr, i) => {
+                      const valueIsIpfs =
+                        typeof attr.value === "string" &&
+                        attr.value.startsWith("ipfs://");
+                      return (
+                        <div key={i} className="bg-gray-50 p-4 rounded-xl">
+                          <p className="text-sm text-gray-500">
+                            {attr.trait_type}
+                          </p>
+                          {valueIsIpfs ? (
+                            <a
+                              href={`https://ipfs.io/ipfs/${attr.value.slice(
+                                7
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white! hover:bg-blue-700 mt-2"
+                            >
+                              View IPFS
+                            </a>
+                          ) : (
+                            <p className="font-semibold">{attr.value}</p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -172,7 +213,7 @@ function BundleDetailModal({
                   disabled={!isConnected}
                 />
 
-                {tonsInput > 0 && (
+                {tonsNumber > 0 && (
                   <div className="bg-white p-6 rounded-xl">
                     <div className="flex justify-between text-xl">
                       <span>Total Cost</span>
@@ -187,8 +228,8 @@ function BundleDetailModal({
                   onClick={handleBuy}
                   disabled={
                     !isConnected ||
-                    tonsInput <= 0 ||
-                    tonsInput > availableTons ||
+                    tonsNumber <= 0 ||
+                    tonsNumber > availableTons ||
                     txLoading ||
                     writePending
                   }
@@ -200,7 +241,7 @@ function BundleDetailModal({
                 </button>
 
                 <p className="text-sm text-center text-gray-600">
-                  Seller: {sale?.seller.slice(0, 10)}...{sale?.seller.slice(-8)}
+                  Seller: {sale?.seller}
                 </p>
               </div>
             </div>
@@ -219,26 +260,24 @@ export default function MarketplaceSection() {
   const [selectedBundle, setSelectedBundle] = useState<bigint | null>(null);
   const [sellBundleId, setSellBundleId] = useState("");
 
-  const {
-    writeContract,
-    data: hash,
-    isPending: writePending,
-  } = useWriteContract();
+  const { writeContract, data: hash } = useWriteContract();
   // Sửa lỗi 2: Đúng cách dùng useWaitForTransactionReceipt
   const { isLoading: txLoading } = useWaitForTransactionReceipt({ hash });
 
   // === Danh sách bundle đang bán ===
-  const { data: activeBatchIds = [] } = useReadContract({
+  const { data: activeBatchIdsRaw } = useReadContract({
     address: CONTRACT_ADDRESSES.MARKETPLACE,
     abi: MarketplaceABI,
     functionName: "getActiveBatchSales",
   });
 
+  const activeBatchIds = (activeBatchIdsRaw as bigint[]) || [];
+
   // Batch read sale info
   const { data: salesData } = useReadContracts({
-    contracts: activeBatchIds.map((id) => ({
+    contracts: activeBatchIds.map((id: bigint) => ({
       address: CONTRACT_ADDRESSES.MARKETPLACE,
-      abi: MarketplaceABI,
+      abi: MarketplaceABI as Abi,
       functionName: "getBatchSale",
       args: [id],
     })),
@@ -247,13 +286,20 @@ export default function MarketplaceSection() {
 
   // Sửa lỗi 3: Dùng useReadContracts để lấy tất cả tokenURI cùng lúc
   const { data: tokenURIs } = useReadContracts({
-    contracts: activeBatchIds.map((id) => ({
+    contracts: activeBatchIds.map((id: bigint) => ({
       address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
-      abi: GreenNFTABI,
+      abi: GreenNFTABI as Abi,
       functionName: "tokenURI",
       args: [id],
     })),
     allowFailure: false,
+  });
+
+  const { data: purchaseHistory } = useReadContract({
+    address: isConnected ? CONTRACT_ADDRESSES.MARKETPLACE : undefined,
+    abi: MarketplaceABI,
+    functionName: "getPurchaseHistory",
+    args: address ? [address] : undefined,
   });
 
   const [metadataCache, setMetadataCache] = useState<
@@ -263,9 +309,11 @@ export default function MarketplaceSection() {
   // Fetch metadata từ tokenURIs (an toàn, không dùng hook trong effect)
   useEffect(() => {
     if (!tokenURIs || tokenURIs.length === 0) return;
-    tokenURIs.forEach(async (uriResult, i) => {
-      const idStr = activeBatchIds[i].toString();
-      if (!uriResult || metadataCache[idStr]) return;
+    tokenURIs.forEach(async (uriResult: unknown, i: number) => {
+      const idStr = activeBatchIds[i]?.toString();
+      if (!idStr || !uriResult) return;
+      // Skip if already cached
+      if (metadataCache[idStr]) return;
       let uri = typeof uriResult === "string" ? uriResult : "";
       if (uri.startsWith("ipfs://"))
         uri = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
@@ -275,72 +323,109 @@ export default function MarketplaceSection() {
           const meta = await res.json();
           setMetadataCache((prev) => ({ ...prev, [idStr]: meta }));
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("Failed to fetch metadata:", e);
+      }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenURIs, activeBatchIds]);
+
+  // Filter batches: available batches (not owned by user) và my listings (owned by user)
+  const availableBatches = activeBatchIds
+    .map((id: bigint, i: number) => {
+      const sale = salesData?.[i];
+      if (!sale || !Array.isArray(sale) || !(sale[3] as boolean)) return null;
+      const seller = sale[0] as string;
+      // Chỉ lấy batch không phải của mình
+      if (address && seller.toLowerCase() === address.toLowerCase())
+        return null;
+      return { id, sale, index: i };
+    })
+    .filter(
+      (item): item is { id: bigint; sale: unknown[]; index: number } =>
+        item !== null
+    );
+
+  const myListings = activeBatchIds
+    .map((id: bigint, i: number) => {
+      const sale = salesData?.[i];
+      if (!sale || !Array.isArray(sale) || !(sale[3] as boolean)) return null;
+      const seller = sale[0] as string;
+      // Chỉ lấy batch của mình
+      if (!address || seller.toLowerCase() !== address.toLowerCase())
+        return null;
+      return { id, sale, index: i };
+    })
+    .filter(
+      (item): item is { id: bigint; sale: unknown[]; index: number } =>
+        item !== null
+    );
 
   // === Phần My Listings (giữ nguyên logic cũ, chỉ sửa nhỏ) ===
   const sellBigId = sellBundleId ? BigInt(sellBundleId) : undefined;
 
   const { data: owner } = useReadContract({
-    address: CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION,
+    address: sellBigId ? CONTRACT_ADDRESSES.GREEN_NFT_COLLECTION : undefined,
     abi: GreenNFTABI,
     functionName: "ownerOf",
     args: sellBigId ? [sellBigId] : undefined,
-    enabled: !!sellBigId,
   });
 
-  const { data: claimId } = useReadContract({
-    address: CONTRACT_ADDRESSES.REGISTRY,
+  const { data: claimIdRaw } = useReadContract({
+    address: sellBigId ? CONTRACT_ADDRESSES.REGISTRY : undefined,
     abi: RegistryABI,
     functionName: "batchToClaimId",
     args: sellBigId ? [sellBigId] : undefined,
-    enabled: !!sellBigId,
   });
 
+  const claimId = claimIdRaw as bigint | undefined;
+
   const { data: claim } = useReadContract({
-    address: CONTRACT_ADDRESSES.REGISTRY,
+    address: claimId ? CONTRACT_ADDRESSES.REGISTRY : undefined,
     abi: RegistryABI,
     functionName: "getClaim",
     args: claimId ? [claimId] : undefined,
-    enabled: !!claimId,
   });
 
-  const actualTons = claim?.reductionTons || 0n;
+  const actualTons =
+    claim && typeof claim === "object" && "reductionTons" in claim
+      ? (claim as { reductionTons: bigint }).reductionTons
+      : 0n;
 
   const { data: saleInfoRaw } = useReadContract({
-    address: CONTRACT_ADDRESSES.MARKETPLACE,
+    address: sellBigId ? CONTRACT_ADDRESSES.MARKETPLACE : undefined,
     abi: MarketplaceABI,
     functionName: "getBatchSale",
     args: sellBigId ? [sellBigId] : undefined,
-    enabled: !!sellBigId,
   });
 
-  const saleInfo = saleInfoRaw
-    ? {
-        availableTons: saleInfoRaw[2] as bigint,
-        active: saleInfoRaw[3] as boolean,
-      }
-    : null;
+  const saleInfo =
+    saleInfoRaw && Array.isArray(saleInfoRaw)
+      ? {
+          availableWei: saleInfoRaw[2] as bigint,
+          active: saleInfoRaw[3] as boolean,
+        }
+      : null;
 
   const { data: allowance } = useReadContract({
-    address: CONTRACT_ADDRESSES.CCT,
+    address: address ? CONTRACT_ADDRESSES.CCT : undefined,
     abi: CCTABI,
     functionName: "allowance",
     args: address ? [address, CONTRACT_ADDRESSES.MARKETPLACE] : undefined,
-    enabled: !!address,
-    watch: true,
   });
 
   const isOwner = owner === address;
-  const hasEnoughAllowance = allowance ? allowance >= actualTons : false;
+  const hasEnoughAllowance =
+    allowance && typeof allowance === "bigint"
+      ? allowance >= actualTons
+      : false;
 
   const approveCCT = () => {
     writeContract({
       address: CONTRACT_ADDRESSES.CCT,
       abi: CCTABI,
       functionName: "approve",
-      args: [CONTRACT_ADDRESSES.MARKETPLACE, actualTons * 1000000000000000000n],
+      args: [CONTRACT_ADDRESSES.MARKETPLACE, actualTons],
     });
   };
 
@@ -389,7 +474,7 @@ export default function MarketplaceSection() {
                 : "text-gray-600"
             }`}
           >
-            Available Bundles ({activeBatchIds.length})
+            Available Bundles ({availableBatches.length})
           </button>
           <button
             onClick={() => setActiveTab("myListings")}
@@ -417,7 +502,7 @@ export default function MarketplaceSection() {
       {/* Tab: Available Bundles */}
       {activeTab === "available" && (
         <div>
-          {activeBatchIds.length === 0 ? (
+          {availableBatches.length === 0 ? (
             <div className="text-center py-20">
               <p className="text-3xl text-gray-500">
                 No bundles currently available
@@ -425,10 +510,9 @@ export default function MarketplaceSection() {
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {activeBatchIds.map((id, i) => {
-                const sale = salesData?.[i];
-                if (!sale || !sale[3]) return null;
-                const tons = Number(formatUnits(sale[2] as bigint, 0));
+              {availableBatches.map(({ id, sale }) => {
+                // sale[2] là bigint (wei), cần chia 1e18 để lấy số ton
+                const tons = Number(formatUnits(sale[2] as bigint, 18));
                 const price = tons * PRICE_PER_TON;
                 const meta = metadataCache[id.toString()];
 
@@ -472,88 +556,175 @@ export default function MarketplaceSection() {
 
       {/* Tab: My Listings (phần bán) */}
       {activeTab === "myListings" && (
-        <div className="bg-white rounded-3xl shadow-2xl p-10">
-          <h2 className="text-3xl font-bold text-green-800 mb-8">
-            List Your Verified Bundle
-          </h2>
-          <input
-            type="number"
-            placeholder="Enter your Bundle Token ID"
-            value={sellBundleId}
-            onChange={(e) => setSellBundleId(e.target.value)}
-            className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-xl mb-6 focus:border-green-500"
-            disabled={!isConnected}
-          />
+        <div>
+          {/* Phần List Bundle Mới */}
+          <div className="bg-white rounded-3xl shadow-2xl p-10 mb-8">
+            <h2 className="text-3xl font-bold text-green-800 mb-8">
+              List Your Verified Bundle
+            </h2>
+            <input
+              type="number"
+              placeholder="Enter your Bundle Token ID"
+              value={sellBundleId}
+              onChange={(e) => setSellBundleId(e.target.value)}
+              className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-xl mb-6 focus:border-green-500"
+              disabled={!isConnected}
+            />
 
-          {sellBigId && !isOwner && (
-            <p className="text-red-600 font-bold text-xl">
-              You do not own this bundle
-            </p>
-          )}
-
-          {sellBigId && isOwner && actualTons > 0n && (
-            <div className="bg-green-50 p-8 rounded-2xl mb-8">
-              <p className="text-2xl font-bold text-green-800">
-                Verified: {Number(formatUnits(actualTons, 0)).toFixed(2)} tons
-                CO₂e
+            {sellBigId && !isOwner && (
+              <p className="text-red-600 font-bold text-xl">
+                You do not own this bundle
               </p>
-              {saleInfo && (
-                <p className="text-lg mt-4">
-                  Status:{" "}
-                  {saleInfo.active
-                    ? `On sale (${Number(
-                        formatUnits(saleInfo.availableTons, 0)
-                      )} tons left)`
-                    : "Not listed"}
-                </p>
-              )}
-            </div>
-          )}
+            )}
 
-          {isOwner &&
-            actualTons > 0n &&
-            !hasEnoughAllowance &&
-            !saleInfo?.active && (
+            {sellBigId && isOwner && actualTons > 0n && (
+              <div className="bg-green-50 p-8 rounded-2xl mb-8">
+                <p className="text-2xl font-bold text-green-800">
+                  Verified: {Number(formatUnits(actualTons, 18))} tons CO₂e
+                </p>
+                {saleInfo && (
+                  <p className="text-lg mt-4">
+                    Status:{" "}
+                    {saleInfo.active
+                      ? `On sale (${Number(
+                          formatUnits(saleInfo.availableWei, 18)
+                        ).toFixed(6)} tons left)`
+                      : "Not listed"}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {isOwner &&
+              actualTons > 0n &&
+              !hasEnoughAllowance &&
+              !saleInfo?.active && (
+                <button
+                  onClick={approveCCT}
+                  disabled={txLoading}
+                  className="w-full bg-orange-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+                >
+                  {txLoading
+                    ? "Approving..."
+                    : "1. Approve CCT for Marketplace"}
+                </button>
+              )}
+
+            {isOwner && hasEnoughAllowance && !saleInfo?.active && (
               <button
-                onClick={approveCCT}
+                onClick={openSale}
                 disabled={txLoading}
-                className="w-full bg-orange-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+                className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
               >
-                {txLoading ? "Approving..." : "1. Approve CCT for Marketplace"}
+                {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
               </button>
             )}
 
-          {isOwner && hasEnoughAllowance && !saleInfo?.active && (
-            <button
-              onClick={openSale}
-              disabled={txLoading}
-              className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
-            >
-              {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
-            </button>
-          )}
+            {isOwner && saleInfo?.active && (
+              <button
+                onClick={cancelSale}
+                disabled={txLoading}
+                className="w-full bg-red-600 text-white py-5 rounded-xl font-bold text-xl"
+              >
+                {txLoading ? "Cancelling..." : "Cancel Listing"}
+              </button>
+            )}
+          </div>
 
-          {isOwner && saleInfo?.active && (
-            <button
-              onClick={cancelSale}
-              disabled={txLoading}
-              className="w-full bg-red-600 text-white py-5 rounded-xl font-bold text-xl"
-            >
-              {txLoading ? "Cancelling..." : "Cancel Listing"}
-            </button>
-          )}
+          {/* Phần Danh sách Batch Đang Bán của Mình */}
+          <div className="bg-white rounded-3xl shadow-2xl p-10">
+            <h2 className="text-3xl font-bold text-green-800 mb-8">
+              My Active Listings ({myListings.length})
+            </h2>
+            {myListings.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-xl text-gray-500">
+                  You don't have any active listings
+                </p>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {myListings.map(({ id, sale }) => {
+                  // sale[2] là bigint (wei), cần chia 1e18 để lấy số ton
+                  const tons = Number(formatUnits(sale[2] as bigint, 18));
+                  const price = tons * PRICE_PER_TON;
+                  const meta = metadataCache[id.toString()];
+
+                  return (
+                    <div
+                      key={id.toString()}
+                      className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-3xl shadow-xl overflow-hidden"
+                    >
+                      {meta?.image && (
+                        <img
+                          src={meta.image.replace(
+                            "ipfs://",
+                            "https://ipfs.io/ipfs/"
+                          )}
+                          alt="Bundle"
+                          className="w-full h-48 object-cover"
+                        />
+                      )}
+                      <div className="p-6">
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">
+                          {meta?.name || `Bundle #${id}`}
+                        </h3>
+                        <p className="text-3xl font-bold text-green-600">
+                          {tons.toFixed(6)} tons
+                        </p>
+                        <p className="text-2xl font-semibold text-blue-600">
+                          {price.toFixed(6)} ETH
+                        </p>
+                        <button
+                          onClick={() => setSellBundleId(id.toString())}
+                          className="mt-6 w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-bold hover:from-blue-700 hover:to-indigo-700"
+                        >
+                          Manage Listing
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Tab: Purchase History (placeholder) */}
       {activeTab === "history" && (
-        <div className="bg-white rounded-3xl shadow-xl p-10 text-center py-20">
-          <p className="text-3xl text-gray-500">
-            Your purchase history will appear here
-          </p>
-          <p className="text-lg text-gray-400 mt-4">
-            (Coming soon with transaction indexing)
-          </p>
+        <div className="bg-white rounded-3xl shadow-xl p-10">
+          <h2 className="text-3xl font-bold mb-8">Purchase History</h2>
+
+          {!purchaseHistory || purchaseHistory.length === 0 ? (
+            <p className="text-gray-500 text-xl text-center">
+              No purchases yet
+            </p>
+          ) : (
+            <div className="space-y-6">
+              {purchaseHistory.map((p: any, i: number) => (
+                <div
+                  key={i}
+                  className="border rounded-xl p-6 flex justify-between"
+                >
+                  <div>
+                    <p className="font-bold">
+                      Bundle #{p.batchTokenId.toString()}
+                    </p>
+                    <p>Tons: {formatUnits(p.tonsWei, 18)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-blue-600">
+                      {formatUnits(p.ethPaid, 18)} ETH
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {new Date(Number(p.timestamp) * 1000).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {/* Modal */}

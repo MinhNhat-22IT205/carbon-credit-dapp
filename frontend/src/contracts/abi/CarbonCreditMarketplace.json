@@ -70,7 +70,7 @@
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "totalTons",
+        "name": "totalWei",
         "type": "uint256"
       },
       {
@@ -101,7 +101,7 @@
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "tons",
+        "name": "tonsWei",
         "type": "uint256"
       },
       {
@@ -113,7 +113,7 @@
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "remainingTons",
+        "name": "remainingWei",
         "type": "uint256"
       }
     ],
@@ -155,12 +155,12 @@
       },
       {
         "internalType": "uint256",
-        "name": "totalTons",
+        "name": "totalWei",
         "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "availableTons",
+        "name": "availableWei",
         "type": "uint256"
       },
       {
@@ -181,7 +181,7 @@
       },
       {
         "internalType": "uint256",
-        "name": "tons",
+        "name": "tonsWei",
         "type": "uint256"
       }
     ],
@@ -246,12 +246,12 @@
       },
       {
         "internalType": "uint256",
-        "name": "totalTons",
+        "name": "totalWei",
         "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "availableTons",
+        "name": "availableWei",
         "type": "uint256"
       },
       {
@@ -266,43 +266,38 @@
   {
     "inputs": [
       {
-        "internalType": "uint256[]",
-        "name": "batchTokenIds",
-        "type": "uint256[]"
+        "internalType": "address",
+        "name": "buyer",
+        "type": "address"
       }
     ],
-    "name": "getMultipleBatchSales",
+    "name": "getPurchaseHistory",
     "outputs": [
       {
         "components": [
           {
-            "internalType": "address",
-            "name": "seller",
-            "type": "address"
-          },
-          {
             "internalType": "uint256",
-            "name": "claimId",
+            "name": "batchTokenId",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "totalTons",
+            "name": "tonsWei",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "availableTons",
+            "name": "ethPaid",
             "type": "uint256"
           },
           {
-            "internalType": "bool",
-            "name": "active",
-            "type": "bool"
+            "internalType": "uint256",
+            "name": "timestamp",
+            "type": "uint256"
           }
         ],
-        "internalType": "struct CarbonCreditMarketplace.BatchSale[]",
-        "name": "sales",
+        "internalType": "struct CarbonCreditMarketplace.Purchase[]",
+        "name": "",
         "type": "tuple[]"
       }
     ],

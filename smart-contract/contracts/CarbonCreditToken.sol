@@ -35,8 +35,11 @@ contract CarbonCreditToken is ERC20, AccessControl {
         _grantRole(MINTER_ROLE, address(this));
     }
 
-    function mint(address to, uint256 tons) external onlyRole(MINTER_ROLE) {
-        _mint(to, tons * 1e18); // 1 CCT = 1 tấn CO2
+    function mint(
+        address to,
+        uint256 tons_in_wei
+    ) external onlyRole(MINTER_ROLE) {
+        _mint(to, tons_in_wei);
     }
 
     /**

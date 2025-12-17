@@ -76,7 +76,7 @@ export default function ProjectSection() {
         <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-6 rounded-xl">
           <p className="text-lg opacity-90">Your Carbon Credits (CCT)</p>
           <p className="text-4xl font-bold mt-3">
-            {balance ? Number(formatUnits(balance, 36)).toFixed(2) : "0.00"}
+            {balance ? Number(formatUnits(balance, 18)).toFixed(2) : "0.00"}
           </p>
           <p className="text-sm opacity-80 mt-2">tons CO₂ verified</p>
         </div>
