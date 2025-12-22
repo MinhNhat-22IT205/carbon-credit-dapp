@@ -23,7 +23,7 @@ const navItems = [
 export function MainLayout({ children }: MainLayoutProps) {
   const { address, isConnected } = useAccount();
   const { isAdmin } = useIsAdmin(address);
-  const isAuditor = useIsAuditor(address);
+  const { isAuditor } = useIsAuditor(address);
 
   const { data: balance } = useReadContract({
     address: CONTRACT_ADDRESSES.CCT,

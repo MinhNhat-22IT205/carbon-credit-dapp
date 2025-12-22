@@ -1,20 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useAccount,
   useReadContract,
   useReadContracts,
   useWriteContract,
+  useWaitForTransactionReceipt,
 } from "wagmi";
 import { formatUnits } from "viem";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import CCTABI from "../contracts/abi/CarbonCreditToken.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 export default function ProjectSection() {
   const { address } = useAccount();
-  const [projectName, setProjectName] = useState("");
-  const [baselineEmissions, setBaselineEmissions] = useState("");
-  const { writeContract, isPending } = useWriteContract();
+  const [projectName, setProjectName] = usePersistentState<string>(
+    "project_form_name",
+    ""
+  );
+  const [baselineEmissions, setBaselineEmissions] = usePersistentState<string>(
+    "project_form_baseline",
+    ""
+  );
+  const { writeContract, isPending, data: hash } = useWriteContract();
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash });
 
   const { data: projectCount } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
@@ -22,19 +31,25 @@ export default function ProjectSection() {
     functionName: "projectIdCounter",
   });
 
-  const { data: balance } = useReadContract({
+  const { data: balance, refetch: refetchBalance } = useReadContract({
     address: CONTRACT_ADDRESSES.CCT,
     abi: CCTABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
-    enabled: !!address,
+    query: {
+      enabled: !!address,
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
-  const { data: projectIds } = useReadContract({
+  const { data: projectIds, refetch: refetchProjectIds } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
     abi: RegistryABI,
     functionName: "getProjectsByOwner",
     args: address ? [address] : undefined,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   }) as { data: bigint[] };
 
   const projectContracts =
@@ -45,10 +60,22 @@ export default function ProjectSection() {
       args: [id],
     })) || [];
 
-  const { data: projects } = useReadContracts({
+  const { data: projects, refetch: refetchProjects } = useReadContracts({
     contracts: projectContracts,
     allowFailure: false,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
+
+  // Refetch data sau khi transaction thành công
+  useEffect(() => {
+    if (txSuccess) {
+      refetchProjectIds();
+      refetchProjects();
+      refetchBalance();
+    }
+  }, [txSuccess, refetchProjectIds, refetchProjects, refetchBalance]);
 
   const registerProject = () => {
     if (!projectName || !baselineEmissions) return;

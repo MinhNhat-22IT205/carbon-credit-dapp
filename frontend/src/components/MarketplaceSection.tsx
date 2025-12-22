@@ -13,6 +13,7 @@ import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
 import CCTABI from "../contracts/abi/CarbonCreditToken.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
 import { Link } from "react-router-dom";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 const PRICE_PER_TON = 0.00005; // ETH/tấn
 
@@ -254,22 +255,35 @@ function BundleDetailModal({
 
 export default function MarketplaceSection() {
   const { address, isConnected } = useAccount();
-  const [activeTab, setActiveTab] = useState<
+  const [activeTab, setActiveTab] = usePersistentState<
     "available" | "myListings" | "history"
-  >("available");
+  >("market_active_tab", "available");
   const [selectedBundle, setSelectedBundle] = useState<bigint | null>(null);
-  const [sellBundleId, setSellBundleId] = useState("");
+  const [sellBundleId, setSellBundleId] = usePersistentState<string>(
+    "market_sell_bundle_id",
+    ""
+  );
 
   const { writeContract, data: hash } = useWriteContract();
   // Sửa lỗi 2: Đúng cách dùng useWaitForTransactionReceipt
-  const { isLoading: txLoading } = useWaitForTransactionReceipt({ hash });
+  const { isLoading: txLoading, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash });
 
   // === Danh sách bundle đang bán ===
-  const { data: activeBatchIdsRaw } = useReadContract({
+  const { data: activeBatchIdsRaw, refetch: refetchActiveBatches } = useReadContract({
     address: CONTRACT_ADDRESSES.MARKETPLACE,
     abi: MarketplaceABI,
     functionName: "getActiveBatchSales",
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
+
+  // Refetch data sau khi transaction thành công
+  useEffect(() => {
+    if (txSuccess) {
+      refetchActiveBatches();
+    }
+  }, [txSuccess, refetchActiveBatches]);
 
   const activeBatchIds = (activeBatchIdsRaw as bigint[]) || [];
 
@@ -282,6 +296,9 @@ export default function MarketplaceSection() {
       args: [id],
     })),
     allowFailure: false,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   // Sửa lỗi 3: Dùng useReadContracts để lấy tất cả tokenURI cùng lúc
@@ -293,6 +310,9 @@ export default function MarketplaceSection() {
       args: [id],
     })),
     allowFailure: false,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   const { data: purchaseHistory } = useReadContract({
@@ -300,6 +320,9 @@ export default function MarketplaceSection() {
     abi: MarketplaceABI,
     functionName: "getPurchaseHistory",
     args: address ? [address] : undefined,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   const [metadataCache, setMetadataCache] = useState<
@@ -510,6 +533,93 @@ export default function MarketplaceSection() {
         </div>
       </div>
 
+      {/* Form List Bundle - Luôn hiển thị để giữ dữ liệu khi chuyển tab */}
+      {isConnected && (
+        <div className="bg-white rounded-3xl shadow-2xl p-10 mb-8">
+          <h2 className="text-3xl font-bold text-green-800 mb-8">
+            List Your Verified Bundle
+          </h2>
+          <input
+            type="number"
+            placeholder="Enter your Bundle Token ID"
+            value={sellBundleId}
+            onChange={(e) => setSellBundleId(e.target.value)}
+            className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-xl mb-6 focus:border-green-500"
+            disabled={!isConnected}
+          />
+
+          {sellBigId && !isOwner && (
+            <p className="text-red-600 font-bold text-xl">
+              You do not own this bundle
+            </p>
+          )}
+
+          {sellBigId && isOwner && actualTons > 0n && (
+            <div className="bg-green-50 p-8 rounded-2xl mb-8">
+              <p className="text-2xl font-bold text-green-800">
+                Verified: {Number(formatUnits(actualTons, 18))} tons CO₂e
+              </p>
+              {saleInfo && (
+                <p className="text-lg mt-4">
+                  Status:{" "}
+                  {saleInfo.active
+                    ? `On sale (${Number(
+                        formatUnits(saleInfo.availableWei, 18)
+                      ).toFixed(6)} tons left)`
+                    : "Not listed"}
+                </p>
+              )}
+            </div>
+          )}
+
+          {sellBigId && isOwner && actualTons > 0n && !isAuditedClaim && (
+            <p className="text-red-600 font-bold text-xl mb-4">
+              This bundle&apos;s claim is not audited or cancelled and cannot
+              be listed.
+            </p>
+          )}
+
+          {isOwner &&
+            actualTons > 0n &&
+            isAuditedClaim &&
+            !hasEnoughAllowance &&
+            !saleInfo?.active && (
+              <button
+                onClick={approveCCT}
+                disabled={txLoading}
+                className="w-full bg-orange-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+              >
+                {txLoading
+                  ? "Approving..."
+                  : "1. Approve CCT for Marketplace"}
+              </button>
+            )}
+
+          {isOwner &&
+            hasEnoughAllowance &&
+            isAuditedClaim &&
+            !saleInfo?.active && (
+              <button
+                onClick={openSale}
+                disabled={txLoading}
+                className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
+              >
+                {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
+              </button>
+            )}
+
+          {isOwner && saleInfo?.active && (
+            <button
+              onClick={cancelSale}
+              disabled={txLoading}
+              className="w-full bg-red-600 text-white py-5 rounded-xl font-bold text-xl"
+            >
+              {txLoading ? "Cancelling..." : "Cancel Listing"}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Tab: Available Bundles */}
       {activeTab === "available" && (
         <div>
@@ -568,91 +678,6 @@ export default function MarketplaceSection() {
       {/* Tab: My Listings (phần bán) */}
       {activeTab === "myListings" && (
         <div>
-          {/* Phần List Bundle Mới */}
-          <div className="bg-white rounded-3xl shadow-2xl p-10 mb-8">
-            <h2 className="text-3xl font-bold text-green-800 mb-8">
-              List Your Verified Bundle
-            </h2>
-            <input
-              type="number"
-              placeholder="Enter your Bundle Token ID"
-              value={sellBundleId}
-              onChange={(e) => setSellBundleId(e.target.value)}
-              className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-xl mb-6 focus:border-green-500"
-              disabled={!isConnected}
-            />
-
-            {sellBigId && !isOwner && (
-              <p className="text-red-600 font-bold text-xl">
-                You do not own this bundle
-              </p>
-            )}
-
-            {sellBigId && isOwner && actualTons > 0n && (
-              <div className="bg-green-50 p-8 rounded-2xl mb-8">
-                <p className="text-2xl font-bold text-green-800">
-                  Verified: {Number(formatUnits(actualTons, 18))} tons CO₂e
-                </p>
-                {saleInfo && (
-                  <p className="text-lg mt-4">
-                    Status:{" "}
-                    {saleInfo.active
-                      ? `On sale (${Number(
-                          formatUnits(saleInfo.availableWei, 18)
-                        ).toFixed(6)} tons left)`
-                      : "Not listed"}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {sellBigId && isOwner && actualTons > 0n && !isAuditedClaim && (
-              <p className="text-red-600 font-bold text-xl mb-4">
-                This bundle&apos;s claim is not audited or cancelled and cannot
-                be listed.
-              </p>
-            )}
-
-            {isOwner &&
-              actualTons > 0n &&
-              isAuditedClaim &&
-              !hasEnoughAllowance &&
-              !saleInfo?.active && (
-                <button
-                  onClick={approveCCT}
-                  disabled={txLoading}
-                  className="w-full bg-orange-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
-                >
-                  {txLoading
-                    ? "Approving..."
-                    : "1. Approve CCT for Marketplace"}
-                </button>
-              )}
-
-            {isOwner &&
-              hasEnoughAllowance &&
-              isAuditedClaim &&
-              !saleInfo?.active && (
-                <button
-                  onClick={openSale}
-                  disabled={txLoading}
-                  className="w-full bg-green-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
-                >
-                  {txLoading ? "Listing..." : "2. List Entire Bundle for Sale"}
-                </button>
-              )}
-
-            {isOwner && saleInfo?.active && (
-              <button
-                onClick={cancelSale}
-                disabled={txLoading}
-                className="w-full bg-red-600 text-white py-5 rounded-xl font-bold text-xl"
-              >
-                {txLoading ? "Cancelling..." : "Cancel Listing"}
-              </button>
-            )}
-          </div>
-
           {/* Phần Danh sách Batch Đang Bán của Mình */}
           <div className="bg-white rounded-3xl shadow-2xl p-10">
             <h2 className="text-3xl font-bold text-green-800 mb-8">

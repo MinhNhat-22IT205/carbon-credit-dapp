@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { MainLayout } from "./layout/MainLayout";
 import ProjectsPage from "./pages/ProjectsPage";
 import ClaimsPage from "./pages/ClaimsPage";
@@ -7,13 +7,14 @@ import MarketPage from "./pages/MarketPage";
 import RetirePage from "./pages/RetirePage";
 import AuditPage from "./pages/AuditPage";
 import AdminAddAuditorPage from "./pages/AdminAddAuditorPage";
+import HomeRedirect from "./components/HomeRedirect";
 
 function App() {
   return (
     <BrowserRouter>
       <MainLayout>
         <Routes>
-          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route path="/" element={<HomeRedirect />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/claims" element={<ClaimsPage />} />
           <Route path="/claims/:claimId" element={<ClaimDetailPage />} />

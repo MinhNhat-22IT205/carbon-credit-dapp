@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   useAccount,
   useReadContract,
@@ -11,6 +11,7 @@ import { formatUnits, parseUnits } from "viem";
 import CCTABI from "../contracts/abi/CarbonCreditToken.json";
 import RetirementABI from "../contracts/abi/RetirementCertificate.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 /* ================= TYPES ================= */
 
@@ -35,7 +36,7 @@ interface RetireHistoryItem {
 
 /* ================= PINATA ================= */
 
-const PINATA_JWT = import.meta.env.VITE_PINATA_JWT as string;
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT as string | undefined;
 
 /* ================= SVG ================= */
 
@@ -126,8 +127,11 @@ export default function RetireSection() {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
 
-  const [tons, setTons] = useState("");
-  const [purpose, setPurpose] = useState("");
+  const [tons, setTons] = usePersistentState<string>("retire_form_tons", "");
+  const [purpose, setPurpose] = usePersistentState<string>(
+    "retire_form_purpose",
+    ""
+  );
   const [status, setStatus] = useState("");
   const [uploading, setUploading] = useState(false);
 
@@ -138,6 +142,9 @@ export default function RetireSection() {
     abi: CCTABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   const balanceWei = (balanceRaw as bigint) ?? 0n;
@@ -218,50 +225,71 @@ export default function RetireSection() {
   const [history, setHistory] = useState<RetireHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
+  const loadHistory = useCallback(async () => {
+    if (!address || !publicClient) return;
+    
+    setLoadingHistory(true);
+    try {
+      const ids = (await publicClient.readContract({
+        address: CONTRACT_ADDRESSES.RETIREMENT_CERTIFICATE,
+        abi: RetirementABI,
+        functionName: "getRetirements",
+        args: [address],
+      })) as bigint[];
+
+      const items = await Promise.all(
+        ids.map(async (id) => {
+          const uri = (await publicClient.readContract({
+            address: CONTRACT_ADDRESSES.RETIREMENT_CERTIFICATE,
+            abi: RetirementABI,
+            functionName: "tokenURI",
+            args: [id],
+          })) as string;
+
+          const base = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
+          const svgUrl = base.replace("metadata.json", "certificate.svg");
+
+          const meta = await (await fetch(base)).json();
+
+          return {
+            certificateId: id,
+            metadata: meta,
+            metadataUrl: base,
+            svgUrl,
+          };
+        })
+      );
+
+      setHistory(items.reverse());
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [address, publicClient]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  // Auto-refresh history mỗi 5 giây
   useEffect(() => {
     if (!address || !publicClient) return;
+    
+    const interval = setInterval(() => {
+      loadHistory();
+    }, 5000);
 
-    const loadHistory = async () => {
-      setLoadingHistory(true);
-      try {
-        const ids = (await publicClient.readContract({
-          address: CONTRACT_ADDRESSES.RETIREMENT_CERTIFICATE,
-          abi: RetirementABI,
-          functionName: "getRetirements",
-          args: [address],
-        })) as bigint[];
+    return () => clearInterval(interval);
+  }, [loadHistory, address, publicClient]);
 
-        const items = await Promise.all(
-          ids.map(async (id) => {
-            const uri = (await publicClient.readContract({
-              address: CONTRACT_ADDRESSES.RETIREMENT_CERTIFICATE,
-              abi: RetirementABI,
-              functionName: "tokenURI",
-              args: [id],
-            })) as string;
-
-            const base = uri.replace("ipfs://", "https://ipfs.io/ipfs/");
-            const svgUrl = base.replace("metadata.json", "certificate.svg");
-
-            const meta = await (await fetch(base)).json();
-
-            return {
-              certificateId: id,
-              metadata: meta,
-              metadataUrl: base,
-              svgUrl,
-            };
-          })
-        );
-
-        setHistory(items.reverse());
-      } finally {
-        setLoadingHistory(false);
-      }
-    };
-
-    loadHistory();
-  }, [address, publicClient]);
+  // Refetch history sau khi transaction thành công
+  useEffect(() => {
+    if (isSuccess) {
+      // Đợi một chút để blockchain cập nhật
+      setTimeout(() => {
+        loadHistory();
+      }, 2000);
+    }
+  }, [isSuccess, loadHistory]);
 
   /* ================= UI ================= */
 

@@ -4,12 +4,14 @@ import {
   useReadContract,
   useReadContracts,
   useWriteContract,
+  useWaitForTransactionReceipt,
 } from "wagmi";
 import { Link } from "react-router-dom";
 import RegistryABI from "../contracts/abi/CarbonCreditRegistry.json";
 import GreenNFTABI from "../contracts/abi/GreenNFTCollection.json";
 import { CONTRACT_ADDRESSES } from "../contracts/addresses";
 import { parseUnits, formatUnits, type Abi } from "viem";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 /* ---------- Types ---------- */
 type ClaimStruct = {
@@ -98,11 +100,23 @@ async function uploadEvidenceToPinata(
 export default function ClaimSection() {
   const { address } = useAccount();
 
-  const [projectId, setProjectId] = useState("");
-  const [reductionTons, setReductionTons] = useState("");
-  const [periodStart, setPeriodStart] = useState("");
-  const [periodEnd, setPeriodEnd] = useState("");
-  const [tab, setTab] = useState<
+  const [projectId, setProjectId] = usePersistentState<string>(
+    "claim_form_projectId",
+    ""
+  );
+  const [reductionTons, setReductionTons] = usePersistentState<string>(
+    "claim_form_reductionTons",
+    ""
+  );
+  const [periodStart, setPeriodStart] = usePersistentState<string>(
+    "claim_form_periodStart",
+    ""
+  );
+  const [periodEnd, setPeriodEnd] = usePersistentState<string>(
+    "claim_form_periodEnd",
+    ""
+  );
+  const [tab, setTab] = usePersistentState<
     | "pending"
     | "approved"
     | "rejected"
@@ -110,14 +124,17 @@ export default function ClaimSection() {
     | "sold"
     | "cancelled"
     | "all"
-  >("all");
+  >("claim_list_tab", "all");
 
   // Upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
 
-  const { writeContract, isPending } = useWriteContract();
+  const { writeContract, isPending, data: hash } = useWriteContract();
+  
+  // Wait for transaction và refetch sau khi thành công
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash });
 
   /* ---------- Project by ID ---------- */
   const { data: project } = useReadContract({
@@ -131,11 +148,14 @@ export default function ClaimSection() {
   }) as { data?: ProjectStruct };
 
   /* ---------- User projects & claims ---------- */
-  const { data: projectIds } = useReadContract({
+  const { data: projectIds, refetch: refetchProjectIds } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
     abi: RegistryABI,
     functionName: "getProjectsByOwner",
     args: address ? [address] : undefined,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   }) as { data?: bigint[] };
 
   const claimIdContracts =
@@ -146,8 +166,11 @@ export default function ClaimSection() {
       args: [pid],
     })) || [];
 
-  const { data: allClaimIdsArray } = useReadContracts({
+  const { data: allClaimIdsArray, refetch: refetchClaimIds } = useReadContracts({
     contracts: claimIdContracts,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   const allClaimIds: bigint[] =
@@ -168,7 +191,21 @@ export default function ClaimSection() {
     args: [id],
   }));
 
-  const { data: claims } = useReadContracts({ contracts: claimContracts });
+  const { data: claims, refetch: refetchClaims } = useReadContracts({ 
+    contracts: claimContracts,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
+  });
+
+  // Refetch data sau khi transaction thành công
+  useEffect(() => {
+    if (txSuccess) {
+      refetchProjectIds();
+      refetchClaimIds();
+      refetchClaims();
+    }
+  }, [txSuccess, refetchProjectIds, refetchClaimIds, refetchClaims]);
 
   /* ---------- Handle file selection ---------- */
   const handleFileChange = (files: FileList | null) => {
@@ -267,6 +304,9 @@ export default function ClaimSection() {
 
   const { data: tokenURIs } = useReadContracts({
     contracts: tokenURIContracts,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   // State lưu metadata đã fetch

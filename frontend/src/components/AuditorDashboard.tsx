@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useReadContract,
   useReadContracts,
@@ -84,7 +84,8 @@ export default function AuditorDashboard() {
     isPending: txPending,
     data: hash,
   } = useWriteContract();
-  const { isLoading: txConfirming } = useWaitForTransactionReceipt({ hash });
+  const { isLoading: txConfirming, isSuccess: txSuccess } =
+    useWaitForTransactionReceipt({ hash });
 
   // State for IPFS uploads
   const [uploadingClaims, setUploadingClaims] = useState<
@@ -104,11 +105,22 @@ export default function AuditorDashboard() {
   }) as { data?: ClaimStruct };
 
   /* ---------- Pending claim IDs ---------- */
-  const { data: pendingClaimIds } = useReadContract({
-    address: CONTRACT_ADDRESSES.REGISTRY,
-    abi: RegistryABI,
-    functionName: "getPendingClaims",
-  }) as { data?: bigint[] };
+  const { data: pendingClaimIds, refetch: refetchPendingClaims } =
+    useReadContract({
+      address: CONTRACT_ADDRESSES.REGISTRY,
+      abi: RegistryABI,
+      functionName: "getPendingClaims",
+      query: {
+        refetchInterval: 5000, // Refresh mỗi 5 giây
+      },
+    }) as { data?: bigint[] };
+
+  // Refetch data sau khi transaction thành công
+  useEffect(() => {
+    if (txSuccess) {
+      refetchPendingClaims();
+    }
+  }, [txSuccess, refetchPendingClaims]);
 
   /* ---------- Batch read claims ---------- */
   const claimContracts =
@@ -121,6 +133,9 @@ export default function AuditorDashboard() {
 
   const { data: pendingClaims } = useReadContracts({
     contracts: claimContracts,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
   });
 
   /* ---------- Batch read projects ---------- */
@@ -136,7 +151,12 @@ export default function AuditorDashboard() {
       };
     }) || [];
 
-  const { data: projects } = useReadContracts({ contracts: projectContracts });
+  const { data: projects } = useReadContracts({ 
+    contracts: projectContracts,
+    query: {
+      refetchInterval: 5000, // Refresh mỗi 5 giây
+    },
+  });
 
   /* ---------- Handle file selection ---------- */
   const handleFileChange = (claimId: string, files: FileList | null) => {

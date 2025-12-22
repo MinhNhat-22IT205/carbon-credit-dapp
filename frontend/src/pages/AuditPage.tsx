@@ -5,7 +5,7 @@ import { useIsAuditor } from "../hooks/useUserRoles";
 
 export default function AuditPage() {
   const { address, isConnected } = useAccount();
-  const isAuditor = useIsAuditor(address);
+  const { isAuditor } = useIsAuditor(address);
 
   if (!isConnected) {
     return (

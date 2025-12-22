@@ -8,7 +8,7 @@ const AUDITOR_ROLE = keccak256(toBytes("AUDITOR_ROLE"));
 const DEFAULT_ADMIN_ROLE = zeroHash;
 
 export function useIsAuditor(address?: `0x${string}`) {
-  const { data: hasRole } = useReadContract({
+  const { data: hasRole, isLoading } = useReadContract({
     address: CONTRACT_ADDRESSES.REGISTRY,
     abi: RegistryABI,
     functionName: "hasRole",
@@ -19,9 +19,9 @@ export function useIsAuditor(address?: `0x${string}`) {
   });
 
   console.log("AUDITOR_ROLE", AUDITOR_ROLE);
-  console.log("hasRole", hasRole, address);
+  console.log("hasRole", hasRole, address, "isLoading", isLoading);
 
-  return !!hasRole;
+  return { isAuditor: !!hasRole, isLoading };
 }
 export function useIsAdmin(address?: `0x${string}`) {
   const { data: hasRole, ...rest } = useReadContract({
