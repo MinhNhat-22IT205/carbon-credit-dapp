@@ -28,9 +28,11 @@ interface NFTMetadata {
 function BundleDetailModal({
   batchId,
   onClose,
+  onPurchaseSuccess,
 }: {
   batchId: bigint;
   onClose: () => void;
+  onPurchaseSuccess?: () => void;
 }) {
   const { isConnected } = useAccount();
   const [tonsToBuy, setTonsToBuy] = useState("");
@@ -39,13 +41,16 @@ function BundleDetailModal({
     data: hash,
     isPending: writePending,
   } = useWriteContract();
-  const { isLoading: txLoading } = useWaitForTransactionReceipt({ hash });
+  const { isLoading: txLoading, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash });
 
-  const { data: saleRaw } = useReadContract({
+  const { data: saleRaw, refetch: refetchSale } = useReadContract({
     address: CONTRACT_ADDRESSES.MARKETPLACE,
     abi: MarketplaceABI,
     functionName: "getBatchSale",
     args: [batchId],
+    query: {
+      refetchInterval: 3000, // Refresh mỗi 3 giây để cập nhật số lượng
+    },
   });
 
   const sale =
@@ -66,6 +71,22 @@ function BundleDetailModal({
   });
 
   const [metadata, setMetadata] = useState<NFTMetadata | null>(null);
+
+  // Refetch sale data sau khi mua thành công
+  useEffect(() => {
+    if (txSuccess) {
+      // Đợi một chút để blockchain cập nhật
+      setTimeout(() => {
+        refetchSale();
+        // Clear input sau khi mua thành công
+        setTonsToBuy("");
+        // Gọi callback để parent component cũng refetch
+        if (onPurchaseSuccess) {
+          onPurchaseSuccess();
+        }
+      }, 2000);
+    }
+  }, [txSuccess, refetchSale, onPurchaseSuccess]);
 
   // Fetch metadata (an toàn, không dùng hook trong effect nữa - dùng effect thuần)
   useEffect(() => {
@@ -278,12 +299,14 @@ export default function MarketplaceSection() {
     },
   });
 
-  // Refetch data sau khi transaction thành công
+  // Refetch data và clear form sau khi transaction thành công
   useEffect(() => {
     if (txSuccess) {
       refetchActiveBatches();
+      // Clear form sau khi list/cancel thành công
+      setSellBundleId("");
     }
-  }, [txSuccess, refetchActiveBatches]);
+  }, [txSuccess, refetchActiveBatches, setSellBundleId]);
 
   const activeBatchIds = (activeBatchIdsRaw as bigint[]) || [];
 
@@ -779,6 +802,10 @@ export default function MarketplaceSection() {
         <BundleDetailModal
           batchId={selectedBundle}
           onClose={() => setSelectedBundle(null)}
+          onPurchaseSuccess={() => {
+            // Refetch active batches khi có purchase thành công
+            refetchActiveBatches();
+          }}
         />
       )}
     </div>

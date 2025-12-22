@@ -266,28 +266,18 @@ export default function RetireSection() {
     }
   }, [address, publicClient]);
 
+  // Load history khi component mount hoặc address thay đổi
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
 
-  // Auto-refresh history mỗi 5 giây
-  useEffect(() => {
-    if (!address || !publicClient) return;
-    
-    const interval = setInterval(() => {
-      loadHistory();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [loadHistory, address, publicClient]);
-
-  // Refetch history sau khi transaction thành công
+  // Cập nhật history sau khi retire thành công
   useEffect(() => {
     if (isSuccess) {
-      // Đợi một chút để blockchain cập nhật
+      // Đợi blockchain cập nhật (thường cần 1-2 block confirmations)
       setTimeout(() => {
         loadHistory();
-      }, 2000);
+      }, 3000);
     }
   }, [isSuccess, loadHistory]);
 

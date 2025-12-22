@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import {
   useAccount,
   useReadContract,
@@ -278,21 +278,25 @@ export default function ClaimSection() {
     }
   };
 
-  const auditedClaims =
-    claims
-      ?.map((item, index: number) => {
-        const claim = item?.result as ClaimStruct | undefined;
-        if (claim && claim.status !== 0n && claim.batchTokenId > 0n) {
-          return {
-            claimId: allClaimIds[index],
-            batchTokenId: claim.batchTokenId,
-          };
-        }
-        return null;
-      })
-      .filter(
-        (ac): ac is { claimId: bigint; batchTokenId: bigint } => ac !== null
-      ) || [];
+  // Memoize auditedClaims để tránh tạo array mới mỗi lần render
+  const auditedClaims = useMemo(() => {
+    return (
+      claims
+        ?.map((item, index: number) => {
+          const claim = item?.result as ClaimStruct | undefined;
+          if (claim && claim.status !== 0n && claim.batchTokenId > 0n) {
+            return {
+              claimId: allClaimIds[index],
+              batchTokenId: claim.batchTokenId,
+            };
+          }
+          return null;
+        })
+        .filter(
+          (ac): ac is { claimId: bigint; batchTokenId: bigint } => ac !== null
+        ) || []
+    );
+  }, [claims, allClaimIds]);
 
   const tokenURIContracts =
     auditedClaims.map((ac) => ({
@@ -305,7 +309,8 @@ export default function ClaimSection() {
   const { data: tokenURIs } = useReadContracts({
     contracts: tokenURIContracts,
     query: {
-      refetchInterval: 5000, // Refresh mỗi 5 giây
+      enabled: tokenURIContracts.length > 0,
+      // Không cần refetch liên tục vì metadata không thay đổi
     },
   });
 
@@ -313,50 +318,73 @@ export default function ClaimSection() {
   const [nftMetadatas, setNftMetadatas] = useState<
     Record<string, NFTMetadata | null>
   >({});
+  
+  // Ref để track các claimId đã được fetch để tránh fetch lại
+  const fetchedClaimIdsRef = useRef<Set<string>>(new Set());
 
-  // Fetch metadata khi có tokenURI
+  // Fetch metadata khi có tokenURI - chỉ fetch khi cần thiết
   useEffect(() => {
     const fetchMetadatas = async () => {
       if (!tokenURIs || auditedClaims.length === 0) return;
-      console.log(tokenURIs);
 
       const newMetadatas: Record<string, NFTMetadata | null> = {};
+      const toFetch: Array<{ claimIdStr: string; metadataUrl: string }> = [];
+
+      // Chuẩn bị danh sách cần fetch
       for (let i = 0; i < tokenURIs.length; i++) {
         const uriResult = tokenURIs[i]?.result as string | undefined;
         const auditedClaim = auditedClaims[i];
         if (!auditedClaim) {
           continue;
         }
-        if (!uriResult) {
-          newMetadatas[auditedClaim.claimId.toString()] = null;
+
+        const claimIdStr = auditedClaim.claimId.toString();
+        
+        // Nếu đã fetch rồi, skip
+        if (fetchedClaimIdsRef.current.has(claimIdStr)) {
           continue;
         }
 
-        // Chuyển ipfs:// thành gateway (Pinata nhanh & ổn định)
+        if (!uriResult) {
+          newMetadatas[claimIdStr] = null;
+          fetchedClaimIdsRef.current.add(claimIdStr);
+          continue;
+        }
+
+        // Chuyển ipfs:// thành gateway
         let metadataUrl = uriResult;
         if (uriResult.startsWith("ipfs://")) {
           metadataUrl = `https://ipfs.io/ipfs/${uriResult.slice(
             7
           )}/metadata.json`;
-          console.log(uriResult);
         } else if (uriResult.includes("ipfs/")) {
           metadataUrl = `https://ipfs.io/ipfs/${uriResult}/metadata.json`;
         }
 
+        toFetch.push({ claimIdStr, metadataUrl });
+      }
+
+      // Fetch metadata cho các claim chưa được fetch
+      for (const { claimIdStr, metadataUrl } of toFetch) {
         try {
           const res = await fetch(metadataUrl);
           if (res.ok) {
             const json = (await res.json()) as NFTMetadata;
-            newMetadatas[auditedClaim.claimId.toString()] = json;
+            newMetadatas[claimIdStr] = json;
           } else {
-            newMetadatas[auditedClaim.claimId.toString()] = null;
+            newMetadatas[claimIdStr] = null;
           }
         } catch (err) {
           console.error("Fetch metadata error:", err);
-          newMetadatas[auditedClaim.claimId.toString()] = null;
+          newMetadatas[claimIdStr] = null;
         }
+        fetchedClaimIdsRef.current.add(claimIdStr);
       }
-      setNftMetadatas(newMetadatas);
+
+      // Update state nếu có metadata mới
+      if (Object.keys(newMetadatas).length > 0) {
+        setNftMetadatas((prev) => ({ ...prev, ...newMetadatas }));
+      }
     };
 
     fetchMetadatas();
