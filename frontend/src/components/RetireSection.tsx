@@ -227,7 +227,7 @@ export default function RetireSection() {
 
   const loadHistory = useCallback(async () => {
     if (!address || !publicClient) return;
-    
+
     setLoadingHistory(true);
     try {
       const ids = (await publicClient.readContract({
@@ -286,7 +286,7 @@ export default function RetireSection() {
   return (
     <div className="max-w-6xl mx-auto py-12 space-y-14">
       <h2 className="text-4xl font-bold text-center text-emerald-800">
-        🌿 Retire Carbon Credits
+        Retire Carbon Credits
       </h2>
 
       {/* ===== FORM ===== */}

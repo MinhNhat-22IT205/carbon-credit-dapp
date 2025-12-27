@@ -41,7 +41,8 @@ function BundleDetailModal({
     data: hash,
     isPending: writePending,
   } = useWriteContract();
-  const { isLoading: txLoading, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash });
+  const { isLoading: txLoading, isSuccess: txSuccess } =
+    useWaitForTransactionReceipt({ hash });
 
   const { data: saleRaw, refetch: refetchSale } = useReadContract({
     address: CONTRACT_ADDRESSES.MARKETPLACE,
@@ -287,17 +288,19 @@ export default function MarketplaceSection() {
 
   const { writeContract, data: hash } = useWriteContract();
   // Sửa lỗi 2: Đúng cách dùng useWaitForTransactionReceipt
-  const { isLoading: txLoading, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash });
+  const { isLoading: txLoading, isSuccess: txSuccess } =
+    useWaitForTransactionReceipt({ hash });
 
   // === Danh sách bundle đang bán ===
-  const { data: activeBatchIdsRaw, refetch: refetchActiveBatches } = useReadContract({
-    address: CONTRACT_ADDRESSES.MARKETPLACE,
-    abi: MarketplaceABI,
-    functionName: "getActiveBatchSales",
-    query: {
-      refetchInterval: 5000, // Refresh mỗi 5 giây
-    },
-  });
+  const { data: activeBatchIdsRaw, refetch: refetchActiveBatches } =
+    useReadContract({
+      address: CONTRACT_ADDRESSES.MARKETPLACE,
+      abi: MarketplaceABI,
+      functionName: "getActiveBatchSales",
+      query: {
+        refetchInterval: 5000, // Refresh mỗi 5 giây
+      },
+    });
 
   // Refetch data và clear form sau khi transaction thành công
   useEffect(() => {
@@ -507,7 +510,7 @@ export default function MarketplaceSection() {
       {/* Header và Tabs giữ nguyên như phiên bản trước */}
       <div className="text-center mb-12">
         <h1 className="text-5xl font-bold text-green-800 mb-4">
-          🌍 Carbon Credit Marketplace
+          Carbon Credit Marketplace
         </h1>
         <p className="text-xl text-gray-600">
           Buy and sell verified, tokenized carbon credits from audited projects
@@ -597,8 +600,8 @@ export default function MarketplaceSection() {
 
           {sellBigId && isOwner && actualTons > 0n && !isAuditedClaim && (
             <p className="text-red-600 font-bold text-xl mb-4">
-              This bundle&apos;s claim is not audited or cancelled and cannot
-              be listed.
+              This bundle&apos;s claim is not audited or cancelled and cannot be
+              listed.
             </p>
           )}
 
@@ -612,9 +615,7 @@ export default function MarketplaceSection() {
                 disabled={txLoading}
                 className="w-full bg-orange-600 text-white py-5 rounded-xl font-bold text-xl mb-4"
               >
-                {txLoading
-                  ? "Approving..."
-                  : "1. Approve CCT for Marketplace"}
+                {txLoading ? "Approving..." : "1. Approve CCT for Marketplace"}
               </button>
             )}
 
