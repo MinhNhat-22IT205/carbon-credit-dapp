@@ -32,6 +32,8 @@ The system consists of five main smart contracts:
 - **Buyer**: Purchases carbon credits from the marketplace
 - **Retirer**: Retires (burns) carbon credits to offset emissions
 
+### Overall architecture
+
 <Image src="./diagrams/Architecture-Diagram.png">
 
 ---
